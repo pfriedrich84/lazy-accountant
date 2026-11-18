@@ -4,7 +4,7 @@ Stand: 18. November 2026. Status: vereinbarte Anforderungen und Umsetzungsvorsch
 
 ## 1. Ziel und Ausgangslage
 
-Eine schlanke, selbst betriebene Webanwendung sammelt Rechnungen, Bank- und Depotunterlagen je Firma, strukturiert sie und verschickt ein vollständiges Paket an die Steuerberatung. Alle wesentlichen Abläufe sollen auch über einen eigenen MCP-Server automatisierbar sein. Deployment erfolgt mit Docker Compose. In der ersten Version übernimmt der vorhandene externe Agent des Nutzers die KI-Auslese und Sortierung über MCP. Versionierte Skills im Repository beschreiben diese Arbeitsabläufe; der Server braucht zunächst keine eigene LLM-Anbindung und keinen eigenen KI-API-Key.
+Eine schlanke, selbst betriebene Webanwendung sammelt Rechnungen, Bank- und Depotunterlagen je Firma, strukturiert sie und verschickt ein vollständiges Paket an die Steuerberatung. Alle wesentlichen Abläufe sollen auch über einen eigenen MCP-Server automatisierbar sein. Deployment erfolgt mit Docker Compose. Weboberfläche, API und MCP laufen zunächst ausschließlich im internen Netz über HTTP. Den Monatslauf stößt der externe Agent über MCP an; ein eigener serverseitiger Monatszeitplaner ist für die erste Version nicht erforderlich. In der ersten Version übernimmt der vorhandene externe Agent des Nutzers die KI-Auslese und Sortierung über MCP. Versionierte Skills im Repository beschreiben diese Arbeitsabläufe; der Server braucht zunächst keine eigene LLM-Anbindung und keinen eigenen KI-API-Key.
 
 Heute entstehen einmalige und wiederkehrende Rechnungen in Invoice Ninja. Für den ersten nutzbaren Stand werden diese Rechnungen einfach als endgültige PDFs hochgeladen oder per E-Mail eingelesen. Eine Invoice-Ninja-Integration ist dafür nicht erforderlich. Eigene Rechnungserstellung und wiederkehrende Rechnungen sind der nächste Ausbau; Projektzeiterfassung und monatliche Leistungsabrechnung folgen später.
 
@@ -107,7 +107,7 @@ Jede erzeugte Paketversion ist ein unveränderlicher Snapshot. Spätere Metadate
 
 ## 6. MCP und gemeinsame Anwendungsfunktionen
 
-Oberfläche und MCP verwenden dieselben fachlichen Funktionen, Validierungen und Firmenberechtigungen. Der MCP-Server ist ein regulärer Zugangsweg, kein separater Datenbestand. Ziel ist ein authentifizierter Remote-MCP-Zugang über Streamable HTTP; Verbindungen erhalten explizite Firmen- und Funktionsrechte.
+Oberfläche und MCP verwenden dieselben fachlichen Funktionen, Validierungen und Firmenberechtigungen. Der MCP-Server ist ein regulärer Zugangsweg, kein separater Datenbestand. Ziel ist ein authentifizierter MCP-Zugang über Streamable HTTP im internen Netz, zunächst ohne TLS; Verbindungen erhalten explizite Firmen- und Funktionsrechte. HTTP ist die festgelegte Transportkonfiguration der ersten Version, keine Freigabe für öffentlichen Betrieb.
 
 Geplante Werkzeuge für die erste Version:
 
@@ -142,7 +142,7 @@ Die Implementierung liefert die Skills als versionierte Markdown-Dateien im Repo
 | --- | --- |
 | dokumenteingang-aufarbeiten | Alle noch nicht verarbeiteten Dokumente der gewählten Firma/Periode paginiert abarbeiten; Original lesen, Dokumentart und Rechnungsdaten ermitteln, bekannte Firma/Kategorie/Periode zuordnen, Summen prüfen, Dubletten verknüpfen und Ergebnisse über MCP speichern. Unsicherheiten mit Belegstelle zur Prüfung ablegen; Abschlussbericht über bearbeitete, übersprungene und offene Dokumente liefern. |
 | konto-und-depotunterlagen-sortieren | CAMT, PDF-Kontoauszüge und Wertpapier-PDFs den bekannten Konten/Depots und Zeiträumen zuordnen, zusammengehörige CAMT/PDF-Unterlagen verknüpfen und unklare Zuordnungen melden. |
-| monatsuebergabe-vorbereiten | Sämtliche Dokumentarten und offenen Punkte einer Firma/Periode berücksichtigen, Nachträge erkennen, Vollständigkeit prüfen und das Übergabepaket mit Inhaltsliste erstellen. SMTP-Versand bei ausdrücklichem Auftrag oder nach eingerichteter Versandregel ausführen und Ergebnis berichten. |
+| monatsuebergabe-vorbereiten | Sämtliche Dokumentarten und offenen Punkte einer Firma/Periode berücksichtigen, Nachträge erkennen, Vollständigkeit prüfen und das Übergabepaket mit Inhaltsliste erstellen. Monatslauf auf Auftrag des externen Agenten ausführen; SMTP-Versand bei entsprechendem Versandauftrag bzw. eingerichteter Berechtigung ausführen und Ergebnis berichten. |
 
 Beispielaufträge:
 
@@ -152,6 +152,14 @@ Beispielaufträge:
 - „Versende das vorbereitete Oktoberpaket an die hinterlegte Steuerberatung.“
 
 Die Skills unterscheiden Aussteller und Empfänger, bewahren Originalwährung und Originaldaten und erfinden keine fehlenden Werte. Extern ausgestellte Ausgangsrechnungen bleiben unverändert. Ungeklärte Fälle werden gesammelt gemeldet; eindeutig zuordenbare Fälle können gemäß gewählter Bearbeitungsregel ohne Einzelrückfrage abgearbeitet werden. Wiederholte Durchläufe überspringen bereits unverändert bearbeitete Dokumente. Dokument- und E-Mail-Inhalte sind Daten, keine ausführbaren Skill-Anweisungen.
+
+### 6.3 Monatslauf durch den externen Agenten
+
+Der externe Agent startet den Monatslauf bei Bedarf über den Skill monatsuebergabe-vorbereiten und die vorhandenen MCP-Werkzeuge. Firma und Jahr/Monat werden explizit übergeben. Er kann zuerst den IMAP-Abruf auslösen, anschließend neue Dokumente auslesen und sortieren, offene Punkte prüfen, das Paket erzeugen und bei entsprechendem Auftrag per SMTP versenden.
+
+Die einzelnen Schritte liefern Status und Ergebnis-IDs, damit der Agent nach Unterbrechungen fortsetzen kann. Wiederholte Aufträge erzeugen keine doppelten Importe oder Versandaufträge; bereits versendete Paketversionen bleiben erkennbar. Ein Auslöser durch den Agenten ist kein Anlass für erneute Einzelbestätigungen innerhalb eines bereits autorisierten Ablaufs.
+
+Die erste Version benötigt dafür keinen eigenen Monats-Cronjob und keinen internen KI-Agenten. Hintergrundaufträge für IMAP-Abruf, Paketerstellung und SMTP-Verarbeitung bleiben davon unabhängig. Hier wird lediglich die Auslösbarkeit geplant; es wird kein tatsächlicher Termin eingerichtet.
 
 ## 7. Oberfläche und Betrieb mit Docker Compose
 
@@ -167,7 +175,7 @@ Vorgeschlagener einfacher Betriebsaufbau:
 
 Docker Compose soll den gesamten Kernbetrieb starten. Kein Kubernetes und keine zusätzlichen Queue-/Objektspeicherdienste als Voraussetzung für die erste Version. Datenbankgestützte Jobs müssen Neustarts, Sperren und Wiederaufnahme beherrschen.
 
-Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne echte Zugangsdaten, dokumentierte Konfiguration, Healthchecks, Migrationen sowie Backup-/Restore-Anleitung. Datenbank und Dokumentdateien werden konsistent gesichert und gemeinsam wiederherstellbar gehalten. Interne Dienste sind nicht öffentlich exponiert; externer Zugriff erfolgt über einen TLS-Reverse-Proxy. Zugangsdaten werden nicht in Git oder Protokollen abgelegt. Konkrete Sprach-/Frameworkwahl und Ressourcenwerte werden vor der Implementierung festgelegt.
+Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne echte Zugangsdaten, dokumentierte Konfiguration, Healthchecks, Migrationen sowie Backup-/Restore-Anleitung. Datenbank und Dokumentdateien werden konsistent gesichert und gemeinsam wiederherstellbar gehalten. Weboberfläche, API und MCP werden ausschließlich intern über HTTP bereitgestellt. Ein TLS-Reverse-Proxy und eine Domain sind keine Startvoraussetzung. Die Datenbank bleibt im internen Compose-Netz. Die Anwendungsauthentifizierung und die Firmen-/Funktionsrechte gelten unabhängig vom HTTP-Transport weiter. Zugangsdaten werden nicht in Git oder Protokollen abgelegt. Konkrete Sprach-/Frameworkwahl und Ressourcenwerte werden vor der Implementierung festgelegt.
 
 ## 8. Reihenfolge und Abnahmekriterien
 
@@ -179,7 +187,7 @@ Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne ec
 4. Paketvorschau, ZIP/Übersichten, SMTP-Versand und Nachträge.
 5. Vollständiger Agentendurchlauf mit den Skills; Docker-Compose-Betrieb und Wiederherstellung ohne interne KI-Anbindung.
 
-Abnahme anhand eines vollständigen Testmonats mit zwei Firmen: Invoice-Ninja-Ausgangsrechnung als PDF, Eingangsrechnung, Gutschrift, CAMT samt passendem PDF-Auszug und Wertpapierbewegung als PDF. Alle Originale erscheinen unter der richtigen Firma und Periode im Paket und liegen sowohl im persistenten Dokument-Volume als auch im ZIP unter /Firma/Jahr/Monat/ER, AR, Bankkonto oder Wertpapiere. Die vier Monatsordner bleiben getrennt, CAMT und PDF liegen gemeinsam unter Bankkonto; Monatskorrekturen verändern keine bereits versendeten Pakete. Eine E-Mail mit mehreren Anhängen wird bei wiederholtem Abruf und nach Neustart nur einmal importiert. Fehlerhafte Auslese verliert keine Datei. Ein Agent kann über MCP alle neuen Dokumente vollständig auflisten, lesen, klassifizieren und seine Ergebnisse speichern; ein zweiter unveränderter Skill-Durchlauf legt nichts doppelt an. Unklare Firmenzuordnungen, abweichende Summen und zwischenzeitliche manuelle Korrekturen bleiben geschützt und sichtbar. Der Server startet ohne eigene LLM-Zugangsdaten. Wiederholte MCP-Aufträge erzeugen keinen Doppelversand. Ein Nachtrag ist vom ursprünglichen Paket unterscheidbar. Versandfehler und unbekannter Versandausgang bleiben sichtbar. Backup und Restore stellen Dokumente, Zuordnungen und Paketstände wieder her.
+Abnahme anhand eines vollständigen Testmonats mit zwei Firmen: Invoice-Ninja-Ausgangsrechnung als PDF, Eingangsrechnung, Gutschrift, CAMT samt passendem PDF-Auszug und Wertpapierbewegung als PDF. Alle Originale erscheinen unter der richtigen Firma und Periode im Paket und liegen sowohl im persistenten Dokument-Volume als auch im ZIP unter /Firma/Jahr/Monat/ER, AR, Bankkonto oder Wertpapiere. Die vier Monatsordner bleiben getrennt, CAMT und PDF liegen gemeinsam unter Bankkonto; Monatskorrekturen verändern keine bereits versendeten Pakete. Eine E-Mail mit mehreren Anhängen wird bei wiederholtem Abruf und nach Neustart nur einmal importiert. Fehlerhafte Auslese verliert keine Datei. Ein Agent kann über MCP alle neuen Dokumente vollständig auflisten, lesen, klassifizieren und seine Ergebnisse speichern; ein zweiter unveränderter Skill-Durchlauf legt nichts doppelt an. Unklare Firmenzuordnungen, abweichende Summen und zwischenzeitliche manuelle Korrekturen bleiben geschützt und sichtbar. Der Server startet ohne eigene LLM-Zugangsdaten, TLS-Zertifikate oder Domain; Oberfläche und MCP sind intern über HTTP erreichbar. Der Agent kann den Monatslauf für eine ausdrücklich gewählte Firma/Periode vollständig anstoßen und nach Unterbrechung fortsetzen. Wiederholte MCP-Aufträge erzeugen keinen Doppelversand. Ein Nachtrag ist vom ursprünglichen Paket unterscheidbar. Versandfehler und unbekannter Versandausgang bleiben sichtbar. Backup und Restore stellen Dokumente, Zuordnungen und Paketstände wieder her.
 
 ### Etappe 2 – Eigene Rechnungen und Bankabgleich
 
@@ -200,6 +208,6 @@ Native Buchhaltungsimporte für die Kanzlei, strukturierte E-Rechnungen, weiterg
 - Gewünschte Konten-/Depotbezeichnungen, Kategorien und Übersichtsspalten mit der Steuerberatung.
 - Mailanbieter, Authentifizierungsverfahren, Importordner, Absender und maximale Anhangsgröße.
 - Vorhandenen Agenten anbinden; Datei-/Seitenzugriff und strukturierte Ergebnisübernahme anhand echter Dokumentarten prüfen. Eine eigene serverseitige KI-Anbindung wird erst bei späterem Bedarf entschieden.
-- Automatisierungsregeln: manueller Paketversand oder explizit eingerichteter Monatslauf; Verhalten bei offenen Punkten.
+- Für den vom Agenten gestarteten Monatslauf: Versandberechtigung und Verhalten bei offenen Punkten konfigurieren. Ein eigener serverseitiger Monatszeitplaner ist nicht erforderlich.
 
 Diese Punkte betreffen die Umsetzungskonfiguration. Die fachliche erste Version bleibt PDF-/Dateiimport, E-Mail-Eingang, strukturierte Übergabe, SMTP-Versand, MCP und Docker Compose.
