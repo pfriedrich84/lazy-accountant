@@ -1,5 +1,6 @@
 import csv
 import io
+import ssl
 import threading
 import zipfile
 from email.message import EmailMessage
@@ -100,6 +101,28 @@ def test_account_category_period_and_missing_fields(actor, companies):
     saved = services.save_result(actor, base)
     assert "Konto/Depot ungeklärt" in saved["issues"]
     assert "Auszugszeitraum unvollständig" in saved["issues"]
+
+
+def test_imap_tls_verifies_certificate_and_hostname(actor, companies):
+    company = companies[0]
+    Mailbox.objects.create(
+        company=company,
+        imap_host="mail.example.test",
+        imap_user="synthetic",
+        imap_tls=True,
+        import_since="2020-01-01",
+    )
+    job = Job.objects.create(company=company, actor_id=actor.user_id, kind="imap", idempotency_key="tls")
+    client = MagicMock()
+    client.select.return_value = ("OK", [b"0"])
+    client.response.return_value = ("UIDVALIDITY", [b"100"])
+    client.uid.return_value = ("OK", [b""])
+    with patch("accounting.mail.imaplib.IMAP4_SSL", return_value=client) as connect:
+        result = mail.scan_mailbox(job)
+    context = connect.call_args.kwargs["ssl_context"]
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+    assert result["messages"] == result["attachments"] == 0
+    client.logout.assert_called_once()
 
 
 def test_admin_preserves_folder_and_assignment_scope(companies):

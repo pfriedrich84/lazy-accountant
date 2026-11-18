@@ -5,6 +5,7 @@ import json
 import math
 import smtplib
 import socket
+import ssl
 import time
 from email import policy
 from email.parser import BytesParser
@@ -224,7 +225,12 @@ def scan_mailbox(job, connector=None):
     actor = Actor(job.actor_id)
     actor.require(mailbox.company_id, "process")
     factory = connector or (imaplib.IMAP4_SSL if mailbox.imap_tls else imaplib.IMAP4)
-    client = factory(mailbox.imap_host, mailbox.imap_port, timeout=20)
+    options = {"timeout": 20}
+    if mailbox.imap_tls:
+        # imaplib's default stdlib context does not verify certificates. Never
+        # send credentials over "TLS" without validating the server identity.
+        options["ssl_context"] = ssl.create_default_context()
+    client = factory(mailbox.imap_host, mailbox.imap_port, **options)
     processed = attachments = 0
     started = time.monotonic()
     try:
