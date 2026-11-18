@@ -201,13 +201,27 @@ Projektzeiten und Sätze erfassen, abrechenbare Leistungen periodisch auswählen
 
 Native Buchhaltungsimporte für die Kanzlei, strukturierte E-Rechnungen, weitergehende Wertpapierauswertung und zusätzliche Integrationen. Ein Bank-Livezugriff ist für den beschriebenen Dateiablauf nicht erforderlich.
 
-## 9. Vor Implementierungsstart zu konkretisieren
+## 9. Entwicklungsstart und spätere Betriebsparameter
 
-- Technikstack und Authentifizierung für Oberfläche sowie MCP.
-- Benötigte CAMT-Versionen anhand echter, anonymisierter Beispieldateien.
-- Gewünschte Konten-/Depotbezeichnungen, Kategorien und Übersichtsspalten mit der Steuerberatung.
-- Mailanbieter, Authentifizierungsverfahren, Importordner, Absender und maximale Anhangsgröße.
-- Den von Orca Server gestarteten Agenten an den internen HTTP-MCP-Endpunkt anbinden; Datei-/Seitenzugriff und strukturierte Ergebnisübernahme anhand echter Dokumentarten prüfen. Eine eigene serverseitige KI-Anbindung wird erst bei späterem Bedarf entschieden.
-- Für den vom Agenten gestarteten Monatslauf: Versandberechtigung und Verhalten bei offenen Punkten konfigurieren. Ein eigener serverseitiger Monatszeitplaner ist nicht erforderlich.
+Der Coding-Agent kann mit Etappe 1 beginnen. Die fachlichen Anforderungen, Ordnerstruktur, interner HTTP-Betrieb, Docker Compose sowie Orca Server als Auslöser des externen Agentenlaufs sind festgelegt.
 
-Diese Punkte betreffen die Umsetzungskonfiguration. Die fachliche erste Version bleibt PDF-/Dateiimport, E-Mail-Eingang, strukturierte Übergabe, SMTP-Versand, MCP und Docker Compose.
+### Technische Umsetzung ohne weitere Grundsatzentscheidung
+
+- Ausgangspunkt: Python-Backend, PostgreSQL und eine schlanke Weboberfläche. Konkrete Frameworks, Bibliotheken und unterstützte Versionen wählt der Coding-Agent passend zum Umfang und dokumentiert die Wahl kurz im Repository.
+- Ein Benutzerkonto mit mehreren getrennten Firmen genügt zunächst. Oberfläche und MCP erhalten eine einfache dokumentierte Authentifizierung und dieselben fachlichen Berechtigungen.
+- Originaldateien liegen in einem konfigurierbaren Hostordner, der über einen Docker-Compose-Bind-Mount eingebunden wird. Darunter gilt die festgelegte Firmen-/Jahres-/Monatsstruktur. Paket-Snapshots und Eingangsablage haben eigene technische Bereiche.
+- Vorschlag für die initiale Monatszuordnung: Rechnungen nach Belegdatum, Konto-/Depotunterlagen nach Auszugsmonat bzw. Ende des Auszugszeitraums. Unsicherheit, mehrmonatige Unterlagen und manuelle Korrekturen bleiben sichtbar und übersteuerbar; das Datum eines Imports bestimmt nicht automatisch den Belegmonat.
+- Für die Entwicklung genügen synthetische Dokumente, konfigurierbare Firmen/Kategorien und ein lokaler Test-Maildienst bzw. kontrollierte Mail-Testadapter. Die Anwendung startet auch ohne produktive IMAP-/SMTP-Zugänge.
+- Für CAMT werden unterstützte Namespaces/Versionen explizit dokumentiert und mit Testdateien geprüft. Nicht unterstützte Dateien bleiben als Original erhalten und erhalten einen sichtbaren Verarbeitungsstatus. Kundenspezifische Beispieldateien können später ergänzt werden.
+- Die mitgelieferten Skills werden gegen die tatsächlich implementierten MCP-Werkzeuge geprüft; Werkzeugnamen, Schemas und Beispielaufträge dürfen nicht nur in der Planung existieren.
+
+### Bei Einrichtung oder Live-Abnahme zu ergänzen
+
+- Interne Serveradresse, Port und Speicherpfade.
+- Firmen, Konten, Depots, Kategorien und gewünschte Übersichtsspalten.
+- IMAP-/SMTP-Anbieter, Zugangsdaten, Ordner, Absender, Empfänger und maximale Mailgröße.
+- Von Orca Server aus erreichbarer HTTP-MCP-Endpunkt und dessen Zugang; Datei-/Seitenzugriff sowie Ergebnisübernahme mit dem dort verwendeten Agenten praktisch prüfen.
+- Versandberechtigung und Verhalten bei offenen Punkten für den vom Agenten gestarteten Monatslauf.
+- Repräsentative anonymisierte Originaldokumente für die Live-Abnahme.
+
+Diese Betriebsparameter blockieren die Entwicklung mit Testdaten nicht. Der erste Lieferumfang ist Etappe 1; eigene Rechnungserstellung, wiederkehrende Rechnungen, Bankabgleich, Projekte und Zeitabrechnung bleiben in den späteren Etappen.
