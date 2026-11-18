@@ -302,6 +302,17 @@ def duplicate_hints(actor, document_id):
     return hints
 
 
+def month_folders(actor, company_id, period, cursor=None):
+    company = actor.require(company_id)
+    valid_period(period)
+    storage.ensure_month(company, period)
+    docs = list_documents(actor, company_id=company_id, period=period, cursor=cursor, limit=100)
+    year, month = period.split("-")
+    return {"folders": [{"name": f, "path": f"{company.folder}/{year}/{month}/{f}/",
+                         "files": [d for d in docs["results"] if storage.KIND_FOLDER.get(d["kind"]) == f]} for f in storage.FOLDERS],
+            "total": docs["total"], "next_cursor": docs["next_cursor"]}
+
+
 def readable_document(actor, document_id, page=1, image=False):
     doc = get_document(actor, document_id)
     data = storage.read_original(doc)

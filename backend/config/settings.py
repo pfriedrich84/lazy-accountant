@@ -60,7 +60,11 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
     "DEFAULT_THROTTLE_RATES": {"anon": "30/min"},
 }
-Q_CLUSTER = {"name": "accountant", "orm": "default", "workers": 2, "timeout": 300,
+# Q2 status uses a process-shared framework cache within the worker container;
+# jobs themselves always use the PostgreSQL ORM broker, not this cache.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+          "qstats": {"BACKEND": "django.core.cache.backends.filebased.FileBasedCache", "LOCATION": "/tmp/lazy-accountant-qstats"}}
+Q_CLUSTER = {"name": "accountant", "orm": "default", "cache": "qstats", "workers": 2, "timeout": 300,
              "retry": 420, "queue_limit": 20, "bulk": 1, "max_attempts": 1,
              "ack_failures": True, "recycle": 100, "sync": os.getenv("Q_SYNC", "0") == "1"}
 MAILERS = {"default": {"BACKEND": os.getenv("MAIL_BACKEND", "accounting.smtp.EmailBackend"), "OPTIONS": {"host": "localhost"}}}

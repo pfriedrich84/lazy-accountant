@@ -152,8 +152,9 @@ def scan_mailbox(job, connector=None):
         if mailbox.uidvalidity != validity:
             mailbox.uidvalidity, mailbox.last_uid = validity, 0
             mailbox.save(update_fields=["uidvalidity", "last_uid"])
-        since = mailbox.import_since.strftime("%d-%b-%Y")
-        status, found = client.uid("search", None, f'(SINCE "{since}" UID {mailbox.last_uid + 1}:*)')
+        months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        since = f"{mailbox.import_since.day:02d}-{months[mailbox.import_since.month - 1]}-{mailbox.import_since.year:04d}"
+        status, found = client.uid("search", None, "SINCE", since, "UID", f"{mailbox.last_uid + 1}:*")
         if status != "OK":
             raise DomainError("IMAP-Suche fehlgeschlagen.")
         uids = sorted(int(x) for x in (found[0] or b"").split() if int(x) > mailbox.last_uid)

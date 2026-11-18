@@ -1,6 +1,9 @@
 """Official MCP SDK v2; all tools call the same domain services as REST."""
+from typing import Any
+
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.db import close_old_connections
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Image
 from mcp.server.transport_security import TransportSecuritySettings
@@ -27,7 +30,11 @@ def actor(ctx):
 
 async def call(ctx, fn, *args, **kwargs):
     def invoke():
-        return fn(actor(ctx), *args, **kwargs)
+        close_old_connections()
+        try:
+            return fn(actor(ctx), *args, **kwargs)
+        finally:
+            close_old_connections()
     return await sync_to_async(invoke, thread_sensitive=True)()
 
 
@@ -38,7 +45,7 @@ async def list_companies(ctx: Context) -> list[dict]:
 
 
 @server.tool()
-async def list_assignments(company_id: int, ctx: Context) -> dict:
+async def list_assignments(company_id: int, ctx: Context) -> dict[str, Any]:
     """Bekannte Firmendaten, Konten, Depots, Kategorien und effektive Funktionsrechte."""
     return await call(ctx, services.known_assignments, company_id)
 
@@ -46,19 +53,19 @@ async def list_assignments(company_id: int, ctx: Context) -> dict:
 @server.tool()
 async def list_documents(ctx: Context, company_id: int | None = None, period: str | None = None,
                          status: str | None = "open", kind: str | None = None, cursor: str | None = None,
-                         limit: int = 50, search: str | None = None) -> dict:
+                         limit: int = 50, search: str | None = None) -> dict[str, Any]:
     """Dokumente vollständig paginieren; next_cursor verwenden, bis er null ist. status=null liefert alle Status."""
     return await call(ctx, services.list_documents, company_id=company_id, period=period, status=status, kind=kind, cursor=cursor, limit=limit, search=search)
 
 
 @server.tool()
-async def get_document(document_id: str, ctx: Context) -> dict:
+async def get_document(document_id: str, ctx: Context) -> dict[str, Any]:
     """Metadaten, Ausgangsversion, Prüfpunkte, deterministisches CAMT-Ergebnis, Herkunft und Revisionen lesen."""
     return await call(ctx, lambda a: services.document_data(services.get_document(a, document_id), True))
 
 
 @server.tool()
-async def read_document(document_id: str, ctx: Context, page: int = 1) -> dict:
+async def read_document(document_id: str, ctx: Context, page: int = 1) -> dict[str, Any]:
     """Text einer Seite bzw. CAMT-Struktur lesen. Leerer Text bei Scans ist kein leerer Beleg: read_page_image verwenden."""
     return await call(ctx, services.readable_document, document_id, page)
 
@@ -72,7 +79,7 @@ async def read_page_image(document_id: str, ctx: Context, page: int = 1) -> Imag
 
 
 @server.tool()
-async def get_file_access(document_id: str, ctx: Context) -> dict:
+async def get_file_access(document_id: str, ctx: Context) -> dict[str, Any]:
     """Authentifizierte relative HTTP-URLs für bytegleiches Original und Seitenzugriff; gleiche Origin wie MCP verwenden."""
     d = await call(ctx, lambda a: services.document_data(services.get_document(a, document_id)))
     return {"document_id": document_id, "sha256": d["sha256"], "bytes": d["size"], "media_type": d["media_type"],
@@ -81,25 +88,25 @@ async def get_file_access(document_id: str, ctx: Context) -> dict:
 
 
 @server.tool()
-async def prepare_upload(filename: str, size: int, sha256: str, ctx: Context, company_id: int | None = None) -> dict:
+async def prepare_upload(filename: str, size: int, sha256: str, ctx: Context, company_id: int | None = None) -> dict[str, Any]:
     """Größe/SHA256 ankündigen, authentifizierte PUT-URL erhalten. Danach complete_upload aufrufen."""
     return await call(ctx, transfers.prepare_upload, filename, size, sha256, company_id)
 
 
 @server.tool()
-async def complete_upload(upload_id: str, ctx: Context) -> dict:
+async def complete_upload(upload_id: str, ctx: Context) -> dict[str, Any]:
     """Abgeschlossenen Original-Dateitransfer idempotent in den Dokumenteingang übernehmen."""
     return await call(ctx, transfers.complete_upload, upload_id)
 
 
 @server.tool()
-async def claim_document(document_id: str, run_id: str, base_version: int, ctx: Context) -> dict:
+async def claim_document(document_id: str, run_id: str, base_version: int, ctx: Context) -> dict[str, Any]:
     """Bearbeitung für 20 Minuten reservieren; manuelle Korrekturen bleiben geschützt und erlaubt."""
     return await call(ctx, transfers.claim_document, document_id, run_id, base_version)
 
 
 @server.tool()
-async def save_document_result(result: DocumentResult, ctx: Context, run_id: str = "external-agent") -> dict:
+async def save_document_result(result: DocumentResult, ctx: Context, run_id: str = "external-agent") -> dict[str, Any]:
     """Vollständiges strukturiertes Ergebnis mit Ausgangsversion speichern. Unbekanntes null lassen; approve nur ohne Prüfpunkte."""
     return await call(ctx, services.save_result, result.model_dump(mode="json"), "agent:" + run_id)
 
@@ -111,13 +118,13 @@ async def find_duplicates(document_id: str, ctx: Context) -> list[dict]:
 
 
 @server.tool()
-async def start_imap_import(company_id: int, idempotency_key: str, ctx: Context) -> dict:
+async def start_imap_import(company_id: int, idempotency_key: str, ctx: Context) -> dict[str, Any]:
     """Persistenten IMAP-Abruf starten; Job-ID zum Wiederaufnehmen/Abfragen erhalten."""
     return await call(ctx, jobs.enqueue_job, company_id, "imap", idempotency_key)
 
 
 @server.tool()
-async def get_job(job_id: str, ctx: Context) -> dict:
+async def get_job(job_id: str, ctx: Context) -> dict[str, Any]:
     """Status, Ergebnis-IDs und Fehler eines Hintergrund-/Agentenauftrags lesen."""
     def get(a):
         j = Job.objects.get(id=job_id)
@@ -127,25 +134,65 @@ async def get_job(job_id: str, ctx: Context) -> dict:
 
 
 @server.tool()
-async def resume_job(job_id: str, ctx: Context) -> dict:
+async def resume_job(job_id: str, ctx: Context) -> dict[str, Any]:
     """Fehlgeschlagenen/unterbrochenen IMAP- oder Paketauftrag explizit fortsetzen. Kein SMTP-Neuversand."""
     return await call(ctx, jobs.resume_job, job_id)
 
 
 @server.tool()
-async def preview_package(company_id: int, periods: list[str], ctx: Context, parent_id: str | None = None) -> dict:
+async def preview_package(company_id: int, periods: list[str], ctx: Context, parent_id: str | None = None) -> dict[str, Any]:
     """Vollständigkeit, alle Dokumentarten, Ausschlüsse, unzugeordneten Eingang, Empfänger und Nachtragsänderungen prüfen."""
     return await call(ctx, packages.package_preview, company_id, periods, parent_id)
 
 
 @server.tool()
-async def create_package(company_id: int, periods: list[str], idempotency_key: str, ctx: Context, parent_id: str | None = None) -> dict:
+async def create_package(company_id: int, periods: list[str], idempotency_key: str, ctx: Context, parent_id: str | None = None) -> dict[str, Any]:
     """Unveränderlichen ZIP-Snapshot asynchron erzeugen; Job-ID liefert später die Paket-ID. Gleicher Schlüssel erzeugt nichts doppelt."""
     return await call(ctx, jobs.enqueue_job, company_id, "package", idempotency_key, {"periods": periods, "parent_id": parent_id})
 
 
 @server.tool()
-async def get_package(package_id: str, ctx: Context) -> dict:
+async def list_packages(company_id: int, ctx: Context, period: str | None = None) -> list[dict]:
+    """Gespeicherte Paketversionen/Nachträge einer Firma finden; optional nach enthaltenem Monat filtern."""
+    def get(a):
+        from .models import Package
+        a.require(company_id)
+        rows = Package.objects.filter(company_id=company_id).order_by("-version")
+        return [packages.package_data(p) for p in rows if period is None or period in p.periods]
+    return await call(ctx, get)
+
+
+@server.tool()
+async def list_dispatches(company_id: int, ctx: Context, package_id: str | None = None) -> list[dict]:
+    """Bisherige Versandaufträge finden, bevor ein Paket erneut gesendet wird."""
+    def get(a):
+        from .models import Dispatch
+        a.require(company_id)
+        rows = Dispatch.objects.filter(package__company_id=company_id).order_by("-created_at")
+        if package_id:
+            rows = rows.filter(package_id=package_id)
+        return [mail.dispatch_data(d) for d in rows[:200]]
+    return await call(ctx, get)
+
+
+@server.tool()
+async def list_import_errors(company_id: int, ctx: Context) -> list[dict]:
+    """Nicht übernommene/zu große IMAP-Anhänge mit Fehler und dauerhaft gespeicherter Herkunft anzeigen."""
+    def get(a):
+        from .models import ImportSource
+        a.require(company_id)
+        return list(ImportSource.objects.filter(mailbox__company_id=company_id).exclude(error="").order_by("-id").values("id", "provenance", "error")[:200])
+    return await call(ctx, get)
+
+
+@server.tool()
+async def list_month_folders(company_id: int, period: str, ctx: Context, cursor: str | None = None) -> dict[str, Any]:
+    """Deterministische echte Monatsordner mit paginiertem Dokumentinhalt lesen; keine freien Dateisystempfade."""
+    return await call(ctx, services.month_folders, company_id, period, cursor)
+
+
+@server.tool()
+async def get_package(package_id: str, ctx: Context) -> dict[str, Any]:
     """Paketversion, eingefrorene Inhaltsliste und Prüfsumme lesen; authentifizierten Download erhalten."""
     data = await call(ctx, lambda a: packages.package_data(packages.get_package(a, package_id), True))
     data["download_url"] = f"/api/packages/{package_id}/download/"
@@ -153,13 +200,13 @@ async def get_package(package_id: str, ctx: Context) -> dict:
 
 
 @server.tool()
-async def send_package(package_id: str, idempotency_key: str, ctx: Context, resend_of: str | None = None) -> dict:
+async def send_package(package_id: str, idempotency_key: str, ctx: Context, resend_of: str | None = None) -> dict[str, Any]:
     """Auf autorisierten Versandauftrag den bestehenden Snapshot an seine eingefrorenen Empfänger senden. Neuversand braucht resend_of."""
     return await call(ctx, mail.queue_dispatch, package_id, idempotency_key, resend_of)
 
 
 @server.tool()
-async def get_dispatch(dispatch_id: str, ctx: Context) -> dict:
+async def get_dispatch(dispatch_id: str, ctx: Context) -> dict[str, Any]:
     """Persistenten Versandstatus, Mailteile, Message-IDs und Versuche abfragen. accepted != zugestellt; unknown nie blind wiederholen."""
     def get(a):
         from .models import Dispatch
@@ -170,14 +217,14 @@ async def get_dispatch(dispatch_id: str, ctx: Context) -> dict:
 
 
 @server.tool()
-async def start_agent_run(company_id: int, period: str, idempotency_key: str, ctx: Context) -> dict:
+async def start_agent_run(company_id: int, period: str, idempotency_key: str, ctx: Context) -> dict[str, Any]:
     """Extern durch Orca gestarteten Monatslauf mit expliziter Firma/Periode nachvollziehbar registrieren; kein eigener Zeitplaner."""
     services.valid_period(period)
     return await call(ctx, jobs.enqueue_job, company_id, "agent", idempotency_key, {"period": period})
 
 
 @server.tool()
-async def report_agent_run(job_id: str, result: dict, ctx: Context, status: str = "done") -> dict:
+async def report_agent_run(job_id: str, result: dict[str, Any], ctx: Context, status: str = "done") -> dict[str, Any]:
     """Bearbeitungsbericht mit Dokument-/Paket-/Versand-IDs und offenen Fällen für den externen Auftrag speichern."""
     return await call(ctx, jobs.finish_agent_run, job_id, result, status)
 

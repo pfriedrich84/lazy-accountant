@@ -21,7 +21,7 @@ def exception_handler(exc, context):
         return Response({"error": str(exc), "details": exc.details}, status=exc.status)
     from django.core.exceptions import ValidationError
     from django.db import IntegrityError
-    if isinstance(exc, (ValueError, TypeError, ValidationError, IntegrityError)):
+    if isinstance(exc, (ValueError, TypeError, KeyError, ValidationError, IntegrityError)):
         return Response({"error": "Ungültige oder widersprüchliche Eingabe."}, status=400)
     return drf_exception_handler(exc, context)
 
@@ -83,6 +83,8 @@ class CompanyDetail(APIView):
 
 class Assignments(APIView):
     def post(self, request, company_id, collection):
+        if collection not in {"accounts", "categories"}:
+            raise DomainError("Zuordnung nicht gefunden.", 404)
         actor = request_actor(request)
         company = actor.require(company_id, "admin")
         model = Account if collection == "accounts" else Category
@@ -94,6 +96,8 @@ class Assignments(APIView):
         return Response({"id": obj.id, **values}, status=201)
 
     def patch(self, request, company_id, collection, object_id=None):
+        if collection not in {"accounts", "categories"}:
+            raise DomainError("Zuordnung nicht gefunden.", 404)
         actor = request_actor(request)
         company = actor.require(company_id, "admin")
         model = Account if collection == "accounts" else Category
@@ -284,15 +288,8 @@ class Schema(APIView):
 
 class Folders(APIView):
     def get(self, request, company_id):
-        actor = request_actor(request)
-        c = actor.require(company_id)
-        period = services.valid_period(request.query_params.get("period", ""))
-        storage.ensure_month(c, period)
-        docs = services.list_documents(actor, company_id=company_id, period=period, limit=100)
-        year, month = period.split("-")
-        return Response({"folders": [{"name": f, "path": f"{c.folder}/{year}/{month}/{f}/",
-                         "files": [d for d in docs["results"] if storage.KIND_FOLDER.get(d["kind"]) == f]} for f in storage.FOLDERS],
-                         "next_cursor": docs["next_cursor"]})
+        return Response(services.month_folders(request_actor(request), company_id,
+                        request.query_params.get("period", ""), request.query_params.get("cursor")))
 
 
 def health(request):

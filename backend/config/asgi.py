@@ -13,6 +13,7 @@ from starlette.staticfiles import StaticFiles  # noqa: E402
 # Django must be initialized before importing models/the MCP tools.
 django_app = get_asgi_application()
 from django.conf import settings  # noqa: E402
+from django.db import close_old_connections  # noqa: E402
 from accounting.auth import DomainError, token_actor  # noqa: E402
 from accounting.mcp import http_app, server  # noqa: E402
 
@@ -28,7 +29,13 @@ class MCPAuthentication:
             try:
                 if not auth.startswith("Bearer "):
                     raise DomainError("Bearer-Token erforderlich.", 401)
-                await sync_to_async(token_actor, thread_sensitive=True)(auth[7:])
+                def authenticate_token():
+                    close_old_connections()
+                    try:
+                        return token_actor(auth[7:])
+                    finally:
+                        close_old_connections()
+                await sync_to_async(authenticate_token, thread_sensitive=True)()
             except DomainError:
                 response = JSONResponse({"error": "Authentifizierung erforderlich."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
                 await response(scope, receive, send)

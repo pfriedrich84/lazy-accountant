@@ -1,0 +1,87 @@
+name: lazy-accountant
+
+x-app: &app
+  build: .
+  image: lazy-accountant:0.1.0
+  user: "${APP_UID:-1000}:${APP_GID:-1000}"
+  environment: &environment
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Run scripts/init-env.py first}
+    ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: ${POSTGRES_DB:-accountant}
+    POSTGRES_USER: ${POSTGRES_USER:-accountant}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,app}
+    CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+    MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-localhost:*,127.0.0.1:*,app:8000}
+    MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-http://localhost:*,http://127.0.0.1:*,http://app:8000}
+    BOOTSTRAP_DEMO: ${BOOTSTRAP_DEMO:-0}
+    DATA_ROOT: /data
+  volumes:
+    - type: bind
+      source: ${DOCUMENTS_ROOT:-./var/documents}
+      target: /data
+      bind:
+        create_host_path: false
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 6m
+
+services:
+  db:
+    image: postgres:18.7-trixie@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-accountant}
+      POSTGRES_USER: ${POSTGRES_USER:-accountant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    <<: *app
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      start_period: 60s
+      retries: 6
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "backend/manage.py", "worker_health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # Controlled synthetic mail system; never enabled by the normal production start.
+  mail-test:
+    profiles: ["test-mail"]
+    image: greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f
+    environment:
+      GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.users=belege:synthetic-mail-password@example.test,kanzlei:synthetic-mail-password@example.test"
+    ports:
+      - "127.0.0.1:3025:3025"
+      - "127.0.0.1:3143:3143"
+    restart: "no"
+
+volumes:
+  postgres:

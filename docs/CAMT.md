@@ -1,0 +1,31 @@
+# CAMT-Unterstützung
+
+Parser: `backend/accounting/camt.py`, `defusedxml` mit verbotenen DTDs, Entities und externen Referenzen. Originalbytes werden **vor der Auslese** unverändert mit SHA256 gespeichert. Ein Parser-/Versionsfehler verliert keine Originaldatei und bleibt als sichtbarer Prüfpunkt am Dokument.
+
+## Explizit akzeptierte Namespaces
+
+Für `camt.052`, `camt.053` und `camt.054` jeweils die Versionen **001.02, 001.08, 001.10, 001.11, 001.12, 001.13**:
+
+```text
+urn:iso:std:iso:20022:tech:xsd:camt.052.001.{02,08,10,11,12,13}
+urn:iso:std:iso:20022:tech:xsd:camt.053.001.{02,08,10,11,12,13}
+urn:iso:std:iso:20022:tech:xsd:camt.054.001.{02,08,10,11,12,13}
+```
+
+Die geschweiften Klammern oben sind Dokumentations-Kurzschreibweise, kein wörtlicher Namespace. Der Parser akzeptiert nur die konkret aufgelösten 18 Namen. Die Liste wird nicht stillschweigend auf zukünftige Versionen erweitert.
+
+## Strukturierte Auslese
+
+Unterstützt wird der gemeinsame strukturierte Kern von `Stmt`, `Rpt` und `Ntfctn`: Auszugskennung, IBAN bzw. andere Kontokennung, Kontowährung, Zeitraum sowie `Ntry`-Beträge, Währung, Soll/Haben-Kennzeichen, Buchungsdatum, Referenz und Zusatztext. Beträge sind `Decimal` und werden als Dezimalstrings zurückgegeben. Soll/Haben bleibt als Originalkennzeichen erhalten; keine LLM-Neuberechnung, kein Rechnungsabgleich.
+
+Dies ist **keine vollständige XSD-Validierung** aller Bank-Spezialvarianten und kein Vollimport sämtlicher CAMT-Detailfelder. Fehlende Angaben bleiben leer, Konten-/Firmenzuordnung und unvollständige/mehmonatige Zeiträume müssen geprüft werden. Das XML-Original bleibt für die Steuerberatung und spätere Parsererweiterungen erhalten. CAMT und PDF desselben Auszugs werden verknüpft, aber weder zusammengeführt noch gegeneinander dedupliziert.
+
+## Fehler und Grenzen
+
+- Unbekannter/fehlender Namespace, kaputtes XML oder fehlender Auszug: `parser_error`, offene Prüfpunkte, keine automatische Freigabe.
+- DTD/Entity-Versuch: Abbruch der Auslese, Original bleibt erhalten; keine Netzwerk-/Dateisystemauflösung.
+- Uploadlimit standardmäßig 25 MiB. Der Mailimport prüft zusätzlich die gesamte Nachricht vor dem Abruf (50 MiB) und die Anhangsanzahl.
+- Nicht unterstützte Mailanhänge erhalten einen Fehlerdatensatz mit Herkunft und gesicherten Bytes unter dem technischen `_rejected`-Bereich. Überlimit-Nachrichten bleiben unverändert im Postfach mit sichtbarem Fehler/UID.
+- Bank-/Depotunterlagen benötigen für die Freigabe bekanntes Konto/Depot und Auszugsbeginn/-ende. Ein Parsererfolg ist kein Nachweis einer richtigen Firmenzuordnung oder vollständigen Buchhaltung.
+
+Tests enthalten synthetisches CAMT, nicht unterstützte Versionen und schädliche XML-Entities. Repräsentative anonymisierte Originaldateien der konkreten Banken gehören zur produktiven Live-Abnahme.
