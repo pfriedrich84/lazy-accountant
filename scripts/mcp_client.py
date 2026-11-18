@@ -102,12 +102,23 @@ def sample_files(company_name, period):
             if invoice
             else {}
         )
+        if kind == "receipt":
+            metadata = {
+                "issuer": "Beispiel Lieferant",
+                "recipient": company_name,
+                "number": f"SCAN-{period}",
+                "date": f"{period}-15",
+                "currency": "EUR",
+                "net": "100.00",
+                "tax": "20.00",
+                "gross": "120.00",
+            }
         if bank:
             metadata = {"period_start": f"{period}-01", "period_end": f"{period}-28"}
         data = (
             sample_camt(period)
             if kind == "bank_camt"
-            else sample_image()
+            else sample_image(company_name, period)
             if kind == "receipt"
             else sample_pdf(["SYNTHETIC", company_name, kind, *[f"{k}: {v}" for k, v in metadata.items()]])
         )

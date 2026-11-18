@@ -7,7 +7,7 @@
 - `db`: PostgreSQL 18.7, nur im Compose-Netz, benanntes Volume unter `/var/lib/postgresql` (Layout von PostgreSQL 18).
 - `mail-test`: ausschließlich optionales Profil `test-mail`, GreenMail 2.1.15 mit **synthetischen** Testzugängen und loopbackgebundenen Ports. Nicht für echte Firmenpost verwenden.
 
-`DOCUMENTS_ROOT` ist ein echter Host-Bind-Mount. Eigentümer `APP_UID:APP_GID` muss darin schreiben dürfen; `scripts/init-env.py` übernimmt die lokale Benutzer-/Gruppen-ID und legt den Pfad an. Ein fehlender Hostpfad wird bewusst nicht von Docker als root angelegt (`create_host_path: false`). Auf einem anderen Host UID/GID/Pfad prüfen.
+`DOCUMENTS_ROOT` ist ein echter Host-Bind-Mount. Eigentümer `APP_UID:APP_GID` muss darin schreiben dürfen; `scripts/init-env.py` übernimmt die lokale Benutzer-/Gruppen-ID und legt den Pfad an. Bei Ausführung des Initialisierungsskripts als root werden stattdessen UID/GID 1000 verwendet und der leere Ablageordner passend übereignet; der App-Einstieg verweigert UID 0. Ein fehlender Hostpfad wird bewusst nicht von Docker als root angelegt (`create_host_path: false`). Auf einem anderen Host UID/GID/Pfad prüfen.
 
 ```text
 <DOCUMENTS_ROOT>/
@@ -28,6 +28,8 @@ Datenbank- und Dokumentvolume sind **ein gemeinsamer Datenbestand**. Dateien all
 
 Django-Q2: Jobtimeout **300 s**, Broker-Retry **420 s**, eine automatische Ausführung bei fachlich fehlgeschlagenen Jobs (`max_attempts=1`, `ack_failures=true`), kleine Fetch-Batches. Fachliche `Job`-/`Dispatch`-/`SendAttempt`-Datensätze und Zeilensperren schützen zusätzliche Side Effects. Eine doppelte Queuezustellung ist kein Anlass, einen bereits laufenden/erledigten fachlichen Auftrag doppelt auszuführen.
 
+Nicht abgeschlossene physische Ablagen erscheinen mit Status/Fehler direkt im Dokument. Sie werden nicht als erfolgreich abgelegt behauptet; die Paketvorschau schließt sie bis zur journalisierten Reparatur ausdrücklich aus.
+
 Eine technische Wartung läuft minütlich über den Q2-Scheduler. Sie repariert ausstehende Dateiablageoperationen, veröffentlicht dauerhaft gespeicherte, noch nicht in den Broker gelangte Aufträge, behandelt verwaiste Aufträge und pollt ausdrücklich aktivierte IMAP-Postfächer. **Kein Monatslauf wird dadurch terminiert**; der Monatsstart kommt von Orca/dem Agenten.
 
 - IMAP: Abruf maximal 20 Nachrichten pro Job, Sockettimeout 20 s, readonly, kein Löschen/Verschieben. Postfach/Ordner/UIDVALIDITY/UID/Anhang sowie stabile Nachrichten-/Anhangshashes schützen Wiederholungen. Cursor erst nach allen dauerhaften Dateien/Herkunfts-/Fehlerdatensätzen einer Nachricht erhöhen. Verbleibende Nachrichten werden im Ergebnis ausgewiesen; weitere Abrufe sind möglich.
@@ -44,6 +46,10 @@ docker compose exec app python backend/manage.py verify_integrity --repair
 ```
 
 Die Integritätsprüfung kontrolliert führende Originale, physische Zuordnung, alle vier Monatsordner, ZIP-/Snapshot-Prüfsummen, Mailteile und erhaltene Fehleranhänge. `--repair` führt ausschließlich das bestehende Dateioperationsjournal erneut aus; keine heuristischen Metadatenänderungen und kein Versand.
+
+## Ressourcenlimits
+
+Standardmäßig 25 MiB pro Original (`MAX_FILE_BYTES`) und 256 MiB summierte Originalbytes pro Paket (`MAX_PACKAGE_BYTES`). Die Paketvorschau nennt das Verarbeitungsgrößenlimit; eine Überschreitung bricht vor dem Erzeugen eines Snapshot-Datensatzes mit sichtbarem Fehler ab, ohne Originale zu verlieren. Bei Bedarf weniger Monate wählen oder das Paketlimit bewusst zusammen mit Arbeitsspeicher/Jobtimeout anpassen: Der ZIP-Bau hält Originale und Ausgabebytes aktuell im Worker-Speicher. Bilder über 25 Megapixel bleiben als Original erhalten, werden aber nicht automatisch decodiert/freigegeben; Bild-/PDF-Vorschauen haben maximal 2000 Pixel Kantenlänge. MIME-Größen werden mit echten SMTP-CRLF-Bytes gemessen, Mailteile vor dem Versand erneut gehasht.
 
 ## Große E-Mails
 

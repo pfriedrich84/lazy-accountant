@@ -19,6 +19,8 @@ Prüfzeitpunkt: **2026-11-18, ab 20:27 UTC**. Ausschließlich stabile Releases. 
 | TanStack Query | 5.108.0 |
 | Vitest / Playwright | 5.1.1 / 1.65.1 |
 | uv (Lockfile/Containerinstallation) | 0.13.9 |
+| ISO-4217-Währungsdaten | iso4217 1.16.20260101 |
+| Kontrollierter Mailtest | GreenMail 2.1.15 |
 
 Alle direkten Python-Abhängigkeiten stehen exakt in `pyproject.toml`, alle transitiven Auflösungen einschließlich Hashes in `uv.lock`. Frontend: exakte Versionen in `frontend/package.json`, transitive Auflösung/Integritäten in `frontend/package-lock.json`. Container-Basisimages erhalten Versions- und Digest-Pins.
 
@@ -36,6 +38,8 @@ Alle direkten Python-Abhängigkeiten stehen exakt in `pyproject.toml`, alle tran
 - [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview), offizielle npm-Paketmetadaten.
 - [PostgreSQL Version Policy](https://www.postgresql.org/support/versioning/) und [Versions-JSON](https://www.postgresql.org/versions.json): neueste stabile Hauptreihe 18, Patch 7.
 - Docker Official Images, Tag-Metadaten über Docker Hub API: `python:3.15.2-slim-trixie`, `node:26.13.1-trixie-slim`, `postgres:18.7-trixie` vorhanden; Digests werden im Dockerfile/Compose festgehalten.
+
+[ISO-4217-Paketmetadaten](https://pypi.org/pypi/iso4217/json) am selben Tag nachgeprüft: stabile 1.16.20260101, Python >= 3.6. Validiert Währungscodes und währungsspezifische Minor Units; Geld-/Steuerprüfung verwendet kaufmännisches `ROUND_HALF_UP` statt zufälliger Binärfloat-/Banker's-Rundung.
 
 Weitere Bibliotheken (Pydantic, pypdf/pdfium, Pillow, openpyxl, defusedxml, Cryptography, pytest, Ruff) wurden anhand ihrer offiziellen PyPI-Release-Metadaten gewählt. Siehe exakte Pins und Lockfile.
 

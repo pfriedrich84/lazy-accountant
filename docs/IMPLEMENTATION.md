@@ -10,13 +10,13 @@ Etappe 1 aus `PLAN.md` vollständig implementieren; spätere Etappen nicht vorzi
 
 - [x] M1: Python-Stack gepinnt/gelockt, Modelle/Migrationen, Auth und gemeinsame Services. Compose/Frontend folgen in M2/M5.
 - [x] M2: Sichere Originalablage, Revisionen, CAMT, REST und nutzerorientierte Oberfläche.
-- [x] M3: IMAP, persistente Jobs, unveränderliche Pakete/Nachträge, SMTP (synthetische Adapter-Abnahme; echter lokaler SMTP-/Compose-Test folgt).
+- [x] M3: IMAP, persistente Jobs, unveränderliche Pakete/Nachträge, SMTP mit echtem kontrolliertem Mailserver geprüft.
 - [x] M4: Authentifiziertes MCP, echter Client-Durchlauf, drei gegen Tool-Schemas geprüfte ausführbare Skills.
-- [ ] M5: Beispielmonat, automatisierte Prüfungen, Browser/Compose, Backup/Restore, CI und Betriebsdokumentation.
+- [x] M5: Beispielmonat, automatisierte Prüfungen, tatsächlicher Browser-/Compose-Lauf, gemeinsames Backup/Restore, CI und Betriebsdokumentation.
 
 ## Bekannte Umgebungseinschränkungen
 
-- Zu Beginn kein Docker/Compose installiert; kein passwortloses sudo. Compose-Laufzeittest ist noch **nicht** nachgewiesen. Alternativen werden geprüft; ein verbleibendes Hindernis wird nicht als erfolgreicher Test dargestellt.
+- Zu Beginn kein Docker/Compose installiert; kein passwortloses sudo. Lokaler Daemon wegen fehlendem privilegierten `newuidmap` nicht nutzbar. **Tatsächlicher Compose-Lauf inzwischen auf GitHub Actions erfolgreich nachgewiesen**, siehe M5.
 - Python 3.13.5 und Node 26.13.0 vorinstalliert. Aktuelle stabile Laufzeiten werden gesondert installiert.
 - Repository enthielt zu Beginn ausschließlich `README.md` und `docs/PLAN.md`.
 
@@ -50,4 +50,26 @@ Etappe 1 aus `PLAN.md` vollständig implementieren; spätere Etappen nicht vorzi
 - Dockerfile/Compose mit Versions-/Digest-Pins, privatem Bind-Mount, Bootstrap und Healthchecks sowie optionalem GreenMail-Profil hinzugefügt. `docker compose config --quiet` (CLI 5.8.0) erfolgreich. Lokaler Daemon weiterhin nicht verfügbar; CI-Compose-Lauf wird separat nachgewiesen.
 - Gemeinsame Backup-/Restore-Skripte und Integritätsprüfung hinzugefügt; Laufzeittest steht noch aus. README und Betriebs-/MCP-/CAMT-Dokumentation beschreiben tatsächlich implementierte Schnittstellen.
 
-Weitere tatsächliche Kommandos und Ergebnisse werden ergänzt. Entwicklung, lokale synthetische Abnahme und produktive Live-Einrichtung bleiben getrennt. Live-Orca, echte IMAP-/SMTP-Zugänge und repräsentative Kundendokumente sind spätere Einrichtungsschritte.
+### 2026-11-18 – M5 / vollständige Compose-Abnahme auf GitHub Actions
+
+**[CI-Lauf 44403271261](https://github.com/pfriedrich84/lazy-accountant/actions/runs/44403271261)**, Commit `c983c53`, abgeschlossen **21:49 UTC: alle drei Jobs erfolgreich**.
+
+- `backend`: PostgreSQL-18.7-Dienst, exakter Python-/uv-Lock, Ruff, unveränderte Migrationen, **21 Tests bestanden**.
+- `frontend`: exakter Node-/npm-Lock, Typecheck, **5 Tests bestanden**, Produktionsbuild erfolgreich.
+- `compose`: Digest-gepinnte Images tatsächlich gebaut; `app`, `worker`, `db` und `mail-test` gestartet und healthy.
+- Tatsächlicher SDK-/IMAP-/ORM-Worker-/SMTP-Durchlauf: **8 Dokumente, 26 Tool-Schemas, 5 angenommene Mailteile, wieder zusammengesetztes ZIP mit identischer SHA256**.
+- Playwright gegen die gebaute Compose-Anwendung: **2 Browserdurchläufe erfolgreich**, Desktop und Mobil; Screenshots ausschließlich synthetischer Daten als CI-Artefakt gespeichert.
+- Worker tatsächlich neugestartet. `scripts/backup.sh` und `scripts/restore.sh` tatsächlich ausgeführt, nicht nur syntaktisch geprüft. Gemeinsame Integritätsprüfung vor/nach Wiederherstellung erfolgreich: **18 Dokumente, 3 Pakete, 1 Versandauftrag**.
+- Danach erneut vollständiger MCP-/IMAP-/SMTP-Monat gegen die wiederhergestellte Anwendung erfolgreich; wiederum bytegleich rekonstruiertes ZIP.
+- Die lokale Docker-Einschränkung bleibt eine Eigenschaft der Entwicklungsmaschine, ist aber **kein offener Compose-Abnahmenachweis mehr**: der echte CI-Lauf belegt den Containerpfad.
+
+### Nachhärtung
+
+ISO-4217-Minor-Units und kaufmännische Steuerrundung, sichere begrenzte Bild-/PDF-Vorschau, Mailteil-SHA256 direkt vor Versand, SMTP-CRLF-Größenmessung, monotone IMAP-Checkpoints bei parallelem Abruf, eindeutige Aliasregeln für geteilte Postfächer, sichtbarer physischer Ablagestatus und konfigurierbares Paketgrößenlimit ergänzt. Explizite Tests für alle 18 CAMT-Namespaces, Formel-Injection, Teilablehnung, manipulierte Teile, Dateioperation-/Integritätsfehler, sichere Restorearchive und konkurrierende Metadatenübernahme.
+
+- Nachhärtung lokal tatsächlich geprüft: **55 Tests auf PostgreSQL 18.7 bestanden**; SQLite: **54 bestanden, 1 ausdrücklich übersprungener PostgreSQL-Zeilensperrentest**. Frontend erneut Typecheck/Produktionsbuild und **5 Tests erfolgreich**; Migrationen unverändert; Compose-Konfiguration gültig.
+
+- Beispielmonat erweitert: Bootstrap erzeugt jetzt je **8 Dokumente in beiden Firmen**, jeweils vollständig separat paketierbar; Kontokennungen und Bildbelege passen zur jeweiligen synthetischen Firma/Periode. Wiederholter Bootstrap ist getestet idempotent. CSV/XLSX frieren auch Konto-/Depotkennung ein.
+- Konten-/Depotnamen, Kennungen und Kategorien sind nun auch direkt in der normalen Oberfläche bearbeitbar. Erweiterter Browserablauf inklusive Anlegen/Umbenennen und Kategoriezuordnung auf Desktop und Mobil erneut **2-mal erfolgreich**. Aktueller lokaler separater PostgreSQL-Worker und echter Mail-/MCP-Durchlauf erneut erfolgreich.
+
+Noch offen ist ausschließlich die kundenspezifische Live-Einrichtung gemäß Betriebsdokumentation: realer Host/Speicher, echte Firmendaten/Mailanbieter/Empfänger, repräsentative anonymisierte Originale und tatsächlicher Orca-Agent/Termin. Der synthetische Client behauptet keinen produktiven Orca-Lauf. Weitere ausgeführte Prüfungen werden ergänzt.

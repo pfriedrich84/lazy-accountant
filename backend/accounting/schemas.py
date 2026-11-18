@@ -1,10 +1,20 @@
 from datetime import date as Date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
+from iso4217 import Currency
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-DocumentKind = Literal["incoming_invoice", "incoming_credit", "receipt", "outgoing_invoice", "outgoing_cancellation", "bank_pdf", "bank_camt", "security_pdf"]
+DocumentKind = Literal[
+    "incoming_invoice",
+    "incoming_credit",
+    "receipt",
+    "outgoing_invoice",
+    "outgoing_cancellation",
+    "bank_pdf",
+    "bank_camt",
+    "security_pdf",
+]
 Period = str
 
 
@@ -57,6 +67,13 @@ class Metadata(BaseModel):
     open_points: list[str] = Field(default_factory=list, max_length=100)
     evidence: dict[str, Evidence] = Field(default_factory=dict)
 
+    @field_validator("currency")
+    @classmethod
+    def iso_currency(cls, value):
+        if value is not None:
+            Currency(value)  # Reject invented/unknown codes, preserve recognized original currencies.
+        return value
+
     @field_validator("net", "tax", "gross", mode="before")
     @classmethod
     def decimal_input(cls, value):
@@ -99,21 +116,40 @@ def validation_issues(kind, company_id, period, account_id, metadata, parser_err
         issues.append("Übergabemonat ungeklärt")
     m = Metadata.model_validate(metadata)
     if kind in {"incoming_invoice", "incoming_credit", "outgoing_invoice", "outgoing_cancellation"}:
-        for field, title in [("issuer", "Aussteller"), ("recipient", "Empfänger"), ("number", "Belegnummer"), ("date", "Belegdatum"), ("currency", "Währung"), ("net", "Netto"), ("tax", "Steuer"), ("gross", "Brutto")]:
+        for field, title in [
+            ("issuer", "Aussteller"),
+            ("recipient", "Empfänger"),
+            ("number", "Belegnummer"),
+            ("date", "Belegdatum"),
+            ("currency", "Währung"),
+            ("net", "Netto"),
+            ("tax", "Steuer"),
+            ("gross", "Brutto"),
+        ]:
             if getattr(m, field) is None or getattr(m, field) == "":
                 issues.append(f"{title} fehlt")
     if m.net is not None and m.tax is not None and m.gross is not None:
-        quantum = Decimal("1") if m.currency in {"JPY", "KRW", "CLP"} else Decimal("0.001") if m.currency in {"KWD", "BHD", "OMR", "TND"} else Decimal("0.01")
-        if (m.net + m.tax).quantize(quantum) != m.gross.quantize(quantum):
+        exponent = Currency(m.currency).exponent if m.currency else 2
+        if exponent is None:
+            issues.append("Währung hat keine definierte Minor Unit; Betragsrundung manuell klären")
+            exponent = 2
+        quantum = Decimal(1).scaleb(-exponent)
+
+        def rounded(value):
+            return value.quantize(quantum, rounding=ROUND_HALF_UP)
+
+        if rounded(m.net + m.tax) != rounded(m.gross):
             issues.append("Netto + Steuer stimmt nicht mit Brutto überein")
         if m.taxes:
             if any(t.net is None or t.tax is None or t.rate is None for t in m.taxes):
                 issues.append("Steueraufteilung unvollständig")
             else:
-                if sum(t.net for t in m.taxes).quantize(quantum) != m.net.quantize(quantum) or sum(t.tax for t in m.taxes).quantize(quantum) != m.tax.quantize(quantum):
+                if rounded(sum(t.net for t in m.taxes)) != rounded(m.net) or rounded(
+                    sum(t.tax for t in m.taxes)
+                ) != rounded(m.tax):
                     issues.append("Steueraufteilung stimmt nicht mit Gesamtsummen überein")
                 for t in m.taxes:
-                    if (t.net * t.rate / Decimal("100")).quantize(quantum) != t.tax.quantize(quantum):
+                    if rounded(t.net * t.rate / Decimal("100")) != rounded(t.tax):
                         issues.append("Steuerbetrag passt nicht zum Steuersatz")
     if kind in {"bank_pdf", "bank_camt", "security_pdf"}:
         if not account_id:
@@ -125,5 +161,7 @@ def validation_issues(kind, company_id, period, account_id, metadata, parser_err
     if parser_error:
         issues.append(parser_error)
     issues.extend(m.open_points)
-    issues.extend(f"Unsicheres Feld {name}: {item.reason}" for name, item in m.evidence.items() if item.uncertain)
+    issues.extend(
+        f"Unsicheres Feld {name}: {item.reason}" for name, item in m.evidence.items() if item.uncertain
+    )
     return list(dict.fromkeys(issues))

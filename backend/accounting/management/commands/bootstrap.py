@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -32,8 +33,15 @@ class Command(BaseCommand):
         if options["demo"] or options["sample_month"]:
             companies = seed_companies(user)
             if options["sample_month"]:
-                ids = seed_month(
-                    user, companies[0], options["sample_month"], options["classified"], options["output"]
+                count = 0
+                for index, company in enumerate(companies):
+                    output = options["output"]
+                    if output and index:
+                        output = Path(output) / company.folder
+                    count += len(
+                        seed_month(user, company, options["sample_month"], options["classified"], output)
+                    )
+                self.stdout.write(
+                    f"Synthetischer Monat angelegt: {count} Dokumente in {len(companies)} getrennten Firmen."
                 )
-                self.stdout.write(f"Synthetischer Monat angelegt: {len(ids)} Dokumente.")
         self.stdout.write("Bootstrap abgeschlossen; bestehende Passwörter bleiben unverändert.")

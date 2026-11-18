@@ -1,26 +1,55 @@
 import csv
 import io
 import json
+import re
 import uuid
 import zipfile
 from collections import Counter
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Max, Q
 from openpyxl import Workbook
 
 from . import storage
 from .auth import DomainError
-from .models import Document, Package, PackageItem
+from .models import Document, FileOperation, Package, PackageItem
 from .services import document_data, valid_period
 
-COLUMNS = ["id", "revision", "kind", "period", "date", "period_start", "period_end", "number", "issuer", "recipient", "account", "category", "net", "tax", "gross", "currency", "file", "sha256"]
+COLUMNS = [
+    "id",
+    "revision",
+    "kind",
+    "period",
+    "date",
+    "period_start",
+    "period_end",
+    "number",
+    "issuer",
+    "recipient",
+    "account",
+    "account_identifier",
+    "category",
+    "net",
+    "tax",
+    "gross",
+    "currency",
+    "file",
+    "sha256",
+]
 
 
 def package_data(p, detailed=False):
-    data = {"id": str(p.id), "company_id": p.company_id, "periods": p.periods, "version": p.version,
-            "parent_id": str(p.parent_id) if p.parent_id else None, "sha256": p.sha256, "size": p.size,
-            "created_at": p.created_at.isoformat()}
+    data = {
+        "id": str(p.id),
+        "company_id": p.company_id,
+        "periods": p.periods,
+        "version": p.version,
+        "parent_id": str(p.parent_id) if p.parent_id else None,
+        "sha256": p.sha256,
+        "size": p.size,
+        "created_at": p.created_at.isoformat(),
+    }
     if detailed:
         data["snapshot"] = p.snapshot
         data["items"] = list(p.items.values("document_id", "revision", "archive_path", "sha256", "metadata"))
@@ -30,7 +59,7 @@ def package_data(p, detailed=False):
 def get_package(actor, package_id, permission="read"):
     try:
         p = Package.objects.get(id=package_id)
-    except (Package.DoesNotExist, ValueError):
+    except Package.DoesNotExist, ValueError:
         raise DomainError("Paket nicht gefunden.", 404) from None
     actor.require(p.company_id, permission)
     return p
@@ -44,9 +73,14 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     parent = get_package(actor, parent_id) if parent_id else None
     if parent and (parent.company_id != company.id or parent.periods != periods):
         raise DomainError("Nachtrag muss dieselbe Firma und dieselben Monate betreffen.")
-    docs = Document.objects.filter(company=company).filter(Q(period__in=periods) | Q(period="")).order_by("period", "id")
+    docs = (
+        Document.objects.filter(company=company)
+        .filter(Q(period__in=periods) | Q(period=""))
+        .order_by("period", "id")
+        .select_related("company", "account", "category")
+    )
     if lock:
-        docs = docs.select_for_update()
+        docs = docs.select_for_update(of=("self",))
     included, excluded, unchanged = [], [], []
     prior = {str(item.document_id): item.revision for item in parent.items.all()} if parent else {}
     # A chain of supplements compares against all previous delivered revisions.
@@ -63,35 +97,67 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
             excluded.append({"document": data, "reason": "Als Dublette markiert"})
         elif doc.status != "ready" or doc.issues:
             excluded.append({"document": data, "reason": "; ".join(doc.issues) or "Noch nicht bestätigt"})
+        elif data["filing_status"] != "done":
+            excluded.append(
+                {"document": data, "reason": "Physische Dateiablage noch ausstehend: " + data["filing_error"]}
+            )
         elif prior.get(str(doc.id)) == doc.version:
             unchanged.append(str(doc.id))
         else:
             data["archive_path"] = storage.desired_path(doc)
             data["account_name"] = doc.account.name if doc.account_id else ""
+            data["account_identifier"] = doc.account.identifier if doc.account_id else ""
             data["category_name"] = doc.category.name if doc.category_id else ""
             included.append(data)
     inbox = []
     try:
         actor.require_inbox(actor.user_id)
-        inbox = [str(x) for x in Document.objects.filter(company__isnull=True, inbox_owner_id=actor.user_id).values_list("id", flat=True)]
+        inbox = [
+            str(x)
+            for x in Document.objects.filter(company__isnull=True, inbox_owner_id=actor.user_id).values_list(
+                "id", flat=True
+            )
+        ]
     except DomainError:
         pass
-    return {"company": {"id": company.id, "name": company.name, "folder": company.folder}, "periods": periods,
-            "parent_id": str(parent.id) if parent else None, "recipients": company.recipients,
-            "allow_open_issues": company.allow_open_issues, "documents": included, "excluded": excluded,
-            "unassigned_inbox": inbox, "unchanged": unchanged, "count": len(included),
-            "bytes": sum(d["size"] for d in included), "by_kind": dict(Counter(d["kind"] for d in included))}
+    return {
+        "company": {"id": company.id, "name": company.name, "folder": company.folder},
+        "periods": periods,
+        "parent_id": str(parent.id) if parent else None,
+        "recipients": company.recipients,
+        "allow_open_issues": company.allow_open_issues,
+        "documents": included,
+        "excluded": excluded,
+        "unassigned_inbox": inbox,
+        "unchanged": unchanged,
+        "count": len(included),
+        "bytes": sum(d["size"] for d in included),
+        "max_package_bytes": settings.MAX_PACKAGE_BYTES,
+        "by_kind": dict(Counter(d["kind"] for d in included)),
+    }
 
 
 def spreadsheet_safe(value):
     value = "" if value is None else str(value)
+    if re.fullmatch(r"-?[0-9]+(?:\.[0-9]+)?", value):
+        return value
     return "'" + value if value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")) else value
 
 
 def overview_row(d):
     m = d["metadata"]
-    values = {"id": d["id"], "revision": d["version"], "kind": d["kind"], "period": d["period"],
-              "file": d["archive_path"], "sha256": d["sha256"], "account": d["account_name"], "category": d["category_name"], **m}
+    values = {
+        "id": d["id"],
+        "revision": d["version"],
+        "kind": d["kind"],
+        "period": d["period"],
+        "file": d["archive_path"],
+        "sha256": d["sha256"],
+        "account": d["account_name"],
+        "account_identifier": d["account_identifier"],
+        "category": d["category_name"],
+        **m,
+    }
     return [spreadsheet_safe(values.get(c)) for c in COLUMNS]
 
 
@@ -102,7 +168,11 @@ def build_archive(snapshot, package_id, version):
         doc = Document.objects.get(id=d["id"])
         data = storage.read_original(doc)
         files[d["archive_path"]] = data
-        originals[d["archive_path"]] = {"document_id": d["id"], "revision": d["version"], "sha256": d["sha256"]}
+        originals[d["archive_path"]] = {
+            "document_id": d["id"],
+            "revision": d["version"],
+            "sha256": d["sha256"],
+        }
     folder = snapshot["company"]["folder"]
     for period in snapshot["periods"]:
         year, month = period.split("-")
@@ -127,16 +197,25 @@ def build_archive(snapshot, package_id, version):
         wb.save(stream)
         files[f"{base}/Uebersicht.xlsx"] = stream.getvalue()
         notes = "\n".join(f"- {e['document']['original_name']}: {e['reason']}" for e in snapshot["excluded"])
-        body = (f"Unterlagen für {snapshot['company']['name']} – {period}\nPaket {package_id}, Version {version}\n"
-                f"Nachtrag zu: {snapshot['parent_id'] or 'keinem Vorgänger'}\nEmpfänger: {', '.join(snapshot['recipients'])}\n"
-                f"{len(docs)} Originale enthalten. Unveränderte Dokumente aus Vorgängern: {len(snapshot['unchanged'])}.\n"
-                f"Offene/ausgeschlossene Unterlagen:\n{notes or 'Keine'}\n"
-                f"Nicht zugeordnete Eingangsdokumente: {len(snapshot['unassigned_inbox'])}\n"
-                "Dies ist eine Unterlagensammlung, keine bestätigte Buchhaltung.\n")
+        body = (
+            f"Unterlagen für {snapshot['company']['name']} – {period}\nPaket {package_id}, Version {version}\n"
+            f"Nachtrag zu: {snapshot['parent_id'] or 'keinem Vorgänger'}\nEmpfänger: {', '.join(snapshot['recipients'])}\n"
+            f"{len(docs)} Originale enthalten. Unveränderte Dokumente aus Vorgängern: {len(snapshot['unchanged'])}.\n"
+            f"Offene/ausgeschlossene Unterlagen:\n{notes or 'Keine'}\n"
+            f"Nicht zugeordnete Eingangsdokumente: {len(snapshot['unassigned_inbox'])}\n"
+            "Dies ist eine Unterlagensammlung, keine bestätigte Buchhaltung.\n"
+        )
         files[f"{base}/Begleitschreiben.txt"] = body.encode()
-        manifest = [{"path": name, "sha256": storage.checksum(data), "bytes": len(data), **originals.get(name, {})}
-                    for name, data in sorted(files.items()) if name.startswith(base + "/") and not name.endswith("/")]
-        files[f"{base}/Inhaltsliste.json"] = json.dumps({"package_id": str(package_id), "version": version, "files": manifest}, ensure_ascii=False, indent=2).encode()
+        manifest = [
+            {"path": name, "sha256": storage.checksum(data), "bytes": len(data), **originals.get(name, {})}
+            for name, data in sorted(files.items())
+            if name.startswith(base + "/") and not name.endswith("/")
+        ]
+        files[f"{base}/Inhaltsliste.json"] = json.dumps(
+            {"package_id": str(package_id), "version": version, "files": manifest},
+            ensure_ascii=False,
+            indent=2,
+        ).encode()
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for name, data in sorted(files.items()):
@@ -155,17 +234,49 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
             if prior.periods != sorted(set(periods)) or str(prior.parent_id or "") != str(parent_id or ""):
                 raise DomainError("Idempotenzschlüssel gehört zu einem anderen Paketauftrag.", 409)
             return package_data(prior, True)
+        for document_id in (
+            FileOperation.objects.filter(document__company=company, status="pending")
+            .values_list("document_id", flat=True)
+            .distinct()
+        ):
+            storage.reconcile(document_id)
         snapshot = package_preview(actor, company_id, periods, parent_id, lock=True)
+        if snapshot["bytes"] > settings.MAX_PACKAGE_BYTES:
+            raise DomainError(
+                "Paket überschreitet das konfigurierte Verarbeitungsgrößenlimit. Weniger Monate auswählen oder das Betriebslimit bewusst anpassen.",
+                413,
+            )
         version = (Package.objects.filter(company=company).aggregate(n=Max("version"))["n"] or 0) + 1
         pid = uuid.uuid4()
         data = build_archive(snapshot, pid, version)
         relative = f"_packages/{pid}.zip"
         storage.atomic_write(relative, data)
-        p = Package.objects.create(id=pid, company=company, periods=snapshot["periods"], version=version,
-                                   parent_id=parent_id, snapshot=snapshot, path=relative, sha256=storage.checksum(data),
-                                   size=len(data), actor_id=actor.user_id, idempotency_key=idempotency_key)
-        PackageItem.objects.bulk_create([PackageItem(package=p, document_id=d["id"], revision=d["version"],
-                                                     archive_path=d["archive_path"], sha256=d["sha256"], metadata=d) for d in snapshot["documents"]])
+        p = Package.objects.create(
+            id=pid,
+            company=company,
+            periods=snapshot["periods"],
+            version=version,
+            parent_id=parent_id,
+            snapshot=snapshot,
+            path=relative,
+            sha256=storage.checksum(data),
+            size=len(data),
+            actor_id=actor.user_id,
+            idempotency_key=idempotency_key,
+        )
+        PackageItem.objects.bulk_create(
+            [
+                PackageItem(
+                    package=p,
+                    document_id=d["id"],
+                    revision=d["version"],
+                    archive_path=d["archive_path"],
+                    sha256=d["sha256"],
+                    metadata=d,
+                )
+                for d in snapshot["documents"]
+            ]
+        )
         for period in p.periods:
             storage.ensure_month(company, period)
     return package_data(p, True)

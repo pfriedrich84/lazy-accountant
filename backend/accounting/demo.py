@@ -33,16 +33,16 @@ def sample_pdf(lines):
     return data + f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n".encode()
 
 
-def sample_image():
+def sample_image(company_name="Beispiel GmbH", period="2026-10"):
     im = Image.new("RGB", (850, 450), "white")
     draw = ImageDraw.Draw(im)
     for i, line in enumerate(
         [
             "SYNTHETISCHER SCANBELEG",
             "Beispiel Lieferant",
-            "Beispiel GmbH",
-            "Rechnung SCAN-2026-10",
-            "Datum 2026-10-15",
+            company_name,
+            f"Rechnung SCAN-{period}",
+            f"Datum {period}-15",
             "Netto EUR 100.00",
             "Steuer EUR 20.00",
             "Brutto EUR 120.00",
@@ -54,11 +54,11 @@ def sample_image():
     return output.getvalue()
 
 
-def sample_camt(period="2026-10"):
+def sample_camt(period="2026-10", iban="AT611904300234573201"):
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08"><BkToCstmrStmt><Stmt>
 <Id>SYNTH-{period}</Id><FrToDt><FrDtTm>{period}-01T00:00:00Z</FrDtTm><ToDtTm>{period}-28T23:59:59Z</ToDtTm></FrToDt>
-<Acct><Id><IBAN>AT611904300234573201</IBAN></Id><Ccy>EUR</Ccy></Acct>
+<Acct><Id><IBAN>{iban}</IBAN></Id><Ccy>EUR</Ccy></Acct>
 <Ntry><Amt Ccy="EUR">120.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>{period}-15</Dt></BookgDt><AcctSvcrRef>SYNTH-1</AcctSvcrRef><AddtlNtryInf>Testrechnung</AddtlNtryInf></Ntry>
 </Stmt></BkToCstmrStmt></Document>""".encode()
 
@@ -82,7 +82,11 @@ def seed_companies(user):
             company=company,
             kind="bank",
             name="Geschäftskonto",
-            defaults={"identifier": "AT611904300234573201"},
+            defaults={
+                "identifier": "AT611904300234573201"
+                if folder == "Beispiel-GmbH"
+                else "DE89370400440532013000"
+            },
         )
         Account.objects.get_or_create(
             company=company, kind="depot", name="Geschäftsdepot", defaults={"identifier": "DEPOT-DEMO"}
@@ -122,12 +126,23 @@ def seed_month(user, company, period="2026-10", classified=False, output=None):
             if invoice
             else {}
         )
+        if kind == "receipt":
+            metadata = {
+                "issuer": "Beispiel Lieferant",
+                "recipient": company.name,
+                "number": f"SCAN-{period}",
+                "date": f"{period}-15",
+                "currency": "EUR",
+                "net": "100.00",
+                "tax": "20.00",
+                "gross": "120.00",
+            }
         if kind in {"bank_pdf", "bank_camt", "security_pdf"}:
             metadata = {"period_start": f"{period}-01", "period_end": f"{period}-28", "currency": "EUR"}
         data = (
-            sample_camt(period)
+            sample_camt(period, Account.objects.get(company=company, kind="bank").identifier)
             if kind == "bank_camt"
-            else sample_image()
+            else sample_image(company.name, period)
             if name.endswith("png")
             else sample_pdf(
                 [

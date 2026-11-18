@@ -133,12 +133,31 @@ function CompanySettings({ company }: { company: Company }) {
   );
 }
 
+type AssignmentEdit = {
+  collection: "accounts" | "categories";
+  id: number;
+  name: string;
+  identifier?: string;
+};
+
 function AssignmentSettings({ companyId }: { companyId: number }) {
   const cache = useQueryClient();
   const [name, setName] = useState("");
   const [kind, setKind] = useState("bank");
   const [identifier, setIdentifier] = useState("");
   const [category, setCategory] = useState("");
+  const [editing, setEditing] = useState<AssignmentEdit | null>(null);
+  const update = useMutation({
+    mutationFn: (edit: AssignmentEdit) =>
+      api(`companies/${companyId}/${edit.collection}/${edit.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: edit.name, identifier: edit.identifier }),
+      }),
+    onSuccess: () => {
+      setEditing(null);
+      void cache.invalidateQueries();
+    },
+  });
   const query = useQuery({
     queryKey: ["assignments", companyId],
     queryFn: () => api<Assignments>(`companies/${companyId}/`),
@@ -169,13 +188,33 @@ function AssignmentSettings({ companyId }: { companyId: number }) {
           Bankkonten & Depots
         </Typography>
         {query.data?.accounts.map((a) => (
-          <Typography key={a.id} sx={{ my: 1 }}>
-            {a.name} · {a.kind === "bank" ? "Bankkonto" : "Depot"} ·{" "}
-            {a.identifier}{" "}
-            <Typography component="span" variant="caption">
-              (ID {a.id})
+          <Stack
+            key={a.id}
+            direction="row"
+            sx={{
+              my: 1,
+              gap: 2,
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <Typography>
+              {a.name} · {a.kind === "bank" ? "Bankkonto" : "Depot"} ·{" "}
+              {a.identifier}{" "}
+              <Typography component="span" variant="caption">
+                (ID {a.id})
+              </Typography>
             </Typography>
-          </Typography>
+            <Button
+              aria-label={`${a.name} bearbeiten`}
+              onClick={() => {
+                update.reset();
+                setEditing({ ...a, collection: "accounts" });
+              }}
+            >
+              Bearbeiten
+            </Button>
+          </Stack>
         ))}
         <Divider sx={{ my: 2 }} />
         <Stack
@@ -218,11 +257,35 @@ function AssignmentSettings({ companyId }: { companyId: number }) {
         <Typography variant="h6" sx={{ mb: 2 }}>
           Kategorien
         </Typography>
-        <Typography sx={{ mb: 2 }}>
-          {query.data?.categories
-            .map((c) => `${c.name} (ID ${c.id})`)
-            .join(" · ") || "Noch keine Kategorien."}
-        </Typography>
+        <Stack sx={{ mb: 2, gap: 1 }}>
+          {query.data?.categories.map((c) => (
+            <Stack
+              key={c.id}
+              direction="row"
+              sx={{
+                gap: 2,
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <Typography>
+                {c.name} (ID {c.id})
+              </Typography>
+              <Button
+                aria-label={`${c.name} bearbeiten`}
+                onClick={() => {
+                  update.reset();
+                  setEditing({ ...c, collection: "categories" });
+                }}
+              >
+                Bearbeiten
+              </Button>
+            </Stack>
+          ))}
+          {query.data?.categories.length === 0 && (
+            <Typography>Noch keine Kategorien.</Typography>
+          )}
+        </Stack>
         <Stack
           direction="row"
           sx={{
@@ -244,6 +307,55 @@ function AssignmentSettings({ companyId }: { companyId: number }) {
         </Stack>
       </Paper>
       <ErrorAlert error={query.error || create.error} />
+      <Dialog
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>
+          {editing?.collection === "accounts"
+            ? "Konto / Depot bearbeiten"
+            : "Kategorie bearbeiten"}
+        </DialogTitle>
+        <DialogContent>
+          <Stack sx={{ gap: 2, pt: 1 }}>
+            <TextField
+              label="Name"
+              value={editing?.name || ""}
+              onChange={(e) =>
+                setEditing((v) => (v ? { ...v, name: e.target.value } : null))
+              }
+            />
+            {editing?.collection === "accounts" && (
+              <TextField
+                label="IBAN / Depotkennung"
+                value={editing.identifier || ""}
+                onChange={(e) =>
+                  setEditing((v) =>
+                    v ? { ...v, identifier: e.target.value } : null,
+                  )
+                }
+              />
+            )}
+            <Alert severity="info">
+              Bestehende Zuordnungen bleiben erhalten; bereits erzeugte
+              Paket-Snapshots werden nicht verändert.
+            </Alert>
+            <ErrorAlert error={update.error} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditing(null)}>Abbrechen</Button>
+          <Button
+            variant="contained"
+            disabled={!editing?.name.trim() || update.isPending}
+            onClick={() => editing && update.mutate(editing)}
+          >
+            Änderungen speichern
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

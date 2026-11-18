@@ -1,4 +1,5 @@
 """Django SMTP backend with explicit visibility of partial recipient rejection."""
+
 import email.policy
 
 from django.core.mail.backends.smtp import EmailBackend as DjangoSMTPBackend

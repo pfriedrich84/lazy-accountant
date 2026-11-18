@@ -40,6 +40,49 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
   await page.getByLabel("Steuerberater-Empfänger").fill("kanzlei@example.test");
   await page.getByRole("button", { name: "Firmendaten speichern" }).click();
   await expect(page.getByText("Firmendaten gespeichert.")).toBeVisible();
+  await page.getByRole("tab", { name: "Konten & Kategorien" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Testkonto");
+  await page
+    .getByLabel("IBAN / Depotkennung", { exact: true })
+    .fill("AT611904300234573201");
+  await page
+    .getByRole("button", { name: "Hinzufügen", exact: true })
+    .first()
+    .click();
+  await page
+    .getByRole("button", { name: "Testkonto bearbeiten", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Name", { exact: true })
+    .fill("Geschäftskonto");
+  await page
+    .getByRole("button", { name: "Änderungen speichern", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Geschäftskonto bearbeiten",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByLabel("Neue Kategorie", { exact: true }).fill("Office");
+  await page
+    .getByRole("button", { name: "Hinzufügen", exact: true })
+    .last()
+    .click();
+  await page
+    .getByRole("button", { name: "Office bearbeiten", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Name", { exact: true })
+    .fill("Büro");
+  await page
+    .getByRole("button", { name: "Änderungen speichern", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Büro bearbeiten", exact: true }),
+  ).toBeVisible();
   await navigate(page, "Dokumenteingang");
   await page
     .getByLabel("Dokumentdateien")
@@ -61,6 +104,8 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
     .getByLabel("Aussteller / Lieferant")
     .fill("Synthetischer Lieferant");
   await page.getByLabel("Empfänger / Kunde").fill(company);
+  await page.getByLabel("Kategorie", { exact: true }).click();
+  await page.getByRole("option", { name: "Büro", exact: true }).click();
   await page.getByLabel("Belegnummer", { exact: true }).fill("BROWSER-1");
   await page.getByLabel("Belegdatum", { exact: true }).fill("2026-10-15");
   await page.getByLabel("Netto (z. B. 100.00)").fill("100.00");
@@ -77,6 +122,7 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
         .evaluate((im: HTMLImageElement) => im.naturalWidth),
     )
     .toBeGreaterThan(0);
+  await page.screenshot({ path: info.outputPath("pruefung.png") });
   await page
     .getByLabel("Übergabemonat", { exact: true })
     .first()

@@ -140,7 +140,8 @@ export default function Documents() {
             mb: 2,
           }}
         >
-          PDF, JPG, PNG und CAMT-XML · bis zu 30 Dateien · max. 25 MiB pro Datei
+          PDF, JPG, PNG und CAMT-XML · bis zu 30 Dateien · standardmäßig 25 MiB
+          pro Datei
         </Typography>
         <input
           ref={input}

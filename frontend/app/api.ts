@@ -149,6 +149,9 @@ export interface Document {
   status: string;
   version: number;
   filed_path: string;
+  filing_status?: "pending" | "done";
+  filing_error?: string;
+  desired_path?: string;
   duplicate_of: string | null;
   related_ids?: string[];
   created_at: string;
@@ -192,6 +195,7 @@ export interface Preview {
   count: number;
   bytes: number;
   by_kind: Record<string, number>;
+  max_package_bytes?: number;
 }
 export interface Job {
   id: string;

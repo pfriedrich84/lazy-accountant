@@ -21,6 +21,7 @@ def exception_handler(exc, context):
         return Response({"error": str(exc), "details": exc.details}, status=exc.status)
     from django.core.exceptions import ValidationError
     from django.db import IntegrityError
+
     if isinstance(exc, (ValueError, TypeError, KeyError, ValidationError, IntegrityError)):
         return Response({"error": "Ungültige oder widersprüchliche Eingabe."}, status=400)
     return drf_exception_handler(exc, context)
@@ -36,10 +37,11 @@ def csrf(request):
 def sign_in(request):
     try:
         payload = json.loads(request.body)
-    except (ValueError, UnicodeDecodeError):
+    except ValueError, UnicodeDecodeError:
         return JsonResponse({"error": "Ungültige Anmeldung."}, status=400)
     # Django's cache-backed throttle is also used before a session exists.
     from django.core.cache import cache
+
     key = "login:" + request.META.get("REMOTE_ADDR", "unknown")
     attempts = cache.get(key, 0)
     if attempts >= 20:
@@ -116,7 +118,25 @@ class Assignments(APIView):
 class Documents(APIView):
     def get(self, request):
         p = request.query_params
-        return Response(services.list_documents(request_actor(request), **{k: p[k] for k in ("company_id", "period", "status", "kind", "search", "category_id", "cursor", "limit") if k in p}))
+        return Response(
+            services.list_documents(
+                request_actor(request),
+                **{
+                    k: p[k]
+                    for k in (
+                        "company_id",
+                        "period",
+                        "status",
+                        "kind",
+                        "search",
+                        "category_id",
+                        "cursor",
+                        "limit",
+                    )
+                    if k in p
+                },
+            )
+        )
 
     def post(self, request):
         files = request.FILES.getlist("files") or request.FILES.getlist("file")
@@ -127,14 +147,23 @@ class Documents(APIView):
             if f.size > settings.MAX_FILE_BYTES:
                 raise DomainError("Datei zu groß.", 413)
             key = request.headers.get("Idempotency-Key")
-            results.append(services.ingest(request_actor(request), f.name, f.read(), request.data.get("company_id") or None,
-                                          f"{key}:{index}" if key else None))
+            results.append(
+                services.ingest(
+                    request_actor(request),
+                    f.name,
+                    f.read(),
+                    request.data.get("company_id") or None,
+                    f"{key}:{index}" if key else None,
+                )
+            )
         return Response({"results": results}, status=201)
 
 
 class DocumentDetail(APIView):
     def get(self, request, document_id):
-        return Response(services.document_data(services.get_document(request_actor(request), document_id), True))
+        return Response(
+            services.document_data(services.get_document(request_actor(request), document_id), True)
+        )
 
     def put(self, request, document_id):
         payload = dict(request.data)
@@ -149,14 +178,21 @@ class DocumentFile(APIView):
         if representation == "duplicates":
             return Response(services.duplicate_hints(actor, document_id))
         if representation == "text":
-            return Response(services.readable_document(actor, document_id, int(request.query_params.get("page", 1))))
+            return Response(
+                services.readable_document(actor, document_id, int(request.query_params.get("page", 1)))
+            )
         if representation == "page":
-            data = services.readable_document(actor, document_id, int(request.query_params.get("page", 1)), image=True)
-            return HttpResponse(data, content_type=doc.media_type if doc.media_type.startswith("image/") else "image/png")
+            data = services.readable_document(
+                actor, document_id, int(request.query_params.get("page", 1)), image=True
+            )
+            return HttpResponse(data, content_type="image/png")
         data = storage.read_original(doc)
         response = HttpResponse(data, content_type=doc.media_type)
         from django.utils.http import content_disposition_header
-        response["Content-Disposition"] = content_disposition_header(doc.media_type == "application/xml", storage.safe_filename(doc.original_name))
+
+        response["Content-Disposition"] = content_disposition_header(
+            doc.media_type == "application/xml", storage.safe_filename(doc.original_name)
+        )
         response["Cache-Control"] = "private, no-store"
         response["Content-Security-Policy"] = "sandbox"
         return response
@@ -172,14 +208,26 @@ class Packages(APIView):
 
     def post(self, request):
         p = request.data
-        return Response(jobs.enqueue_job(request_actor(request), p["company_id"], "package", p["idempotency_key"],
-                                        {"periods": p["periods"], "parent_id": p.get("parent_id")}), status=202)
+        return Response(
+            jobs.enqueue_job(
+                request_actor(request),
+                p["company_id"],
+                "package",
+                p["idempotency_key"],
+                {"periods": p["periods"], "parent_id": p.get("parent_id")},
+            ),
+            status=202,
+        )
 
 
 class Preview(APIView):
     def post(self, request):
         p = request.data
-        return Response(packages.package_preview(request_actor(request), p["company_id"], p["periods"], p.get("parent_id")))
+        return Response(
+            packages.package_preview(
+                request_actor(request), p["company_id"], p["periods"], p.get("parent_id")
+            )
+        )
 
 
 class PackageDetail(APIView):
@@ -195,7 +243,15 @@ class PackageDetail(APIView):
     def post(self, request, package_id, action=None):
         if action != "send":
             raise DomainError("Aktion nicht gefunden.", 404)
-        return Response(mail.queue_dispatch(request_actor(request), package_id, request.data["idempotency_key"], request.data.get("resend_of")), status=202)
+        return Response(
+            mail.queue_dispatch(
+                request_actor(request),
+                package_id,
+                request.data["idempotency_key"],
+                request.data.get("resend_of"),
+            ),
+            status=202,
+        )
 
 
 class Dispatches(APIView):
@@ -229,11 +285,23 @@ class Jobs(APIView):
         if job_id:
             if action == "resume":
                 return Response(jobs.resume_job(request_actor(request), job_id))
-            return Response(jobs.finish_agent_run(request_actor(request), job_id, request.data.get("result", {}), request.data.get("status", "done")))
+            return Response(
+                jobs.finish_agent_run(
+                    request_actor(request),
+                    job_id,
+                    request.data.get("result", {}),
+                    request.data.get("status", "done"),
+                )
+            )
         p = request.data
         if p["kind"] not in {"imap", "agent"}:
             raise DomainError("Ungültige Auftragsart.")
-        return Response(jobs.enqueue_job(request_actor(request), p["company_id"], p["kind"], p["idempotency_key"], p.get("payload", {})), status=202)
+        return Response(
+            jobs.enqueue_job(
+                request_actor(request), p["company_id"], p["kind"], p["idempotency_key"], p.get("payload", {})
+            ),
+            status=202,
+        )
 
 
 class MailSettings(APIView):
@@ -248,7 +316,14 @@ class ImportErrors(APIView):
     def get(self, request, company_id):
         actor = request_actor(request)
         actor.require(company_id)
-        return Response(list(ImportSource.objects.filter(mailbox__company_id=company_id).exclude(error="").order_by("-id").values("id", "provenance", "error")[:200]))
+        return Response(
+            list(
+                ImportSource.objects.filter(mailbox__company_id=company_id)
+                .exclude(error="")
+                .order_by("-id")
+                .values("id", "provenance", "error")[:200]
+            )
+        )
 
 
 class Tokens(APIView):
@@ -256,11 +331,19 @@ class Tokens(APIView):
         actor = request_actor(request)
         if actor.token_id:
             raise DomainError("Tokenverwaltung nur in einer Benutzersitzung.", 403)
-        return Response(list(AccessToken.objects.filter(user=request.user).values("id", "name", "prefix", "scopes", "revoked", "created_at", "expires_at")))
+        return Response(
+            list(
+                AccessToken.objects.filter(user=request.user).values(
+                    "id", "name", "prefix", "scopes", "revoked", "created_at", "expires_at"
+                )
+            )
+        )
 
     def post(self, request):
         p = request.data
-        return Response(issue_token(request_actor(request), p["name"], p["company_ids"], p["scopes"]), status=201)
+        return Response(
+            issue_token(request_actor(request), p["name"], p["company_ids"], p["scopes"]), status=201
+        )
 
     def delete(self, request, token_id):
         actor = request_actor(request)
@@ -288,12 +371,19 @@ class Schema(APIView):
 
 class Folders(APIView):
     def get(self, request, company_id):
-        return Response(services.month_folders(request_actor(request), company_id,
-                        request.query_params.get("period", ""), request.query_params.get("cursor")))
+        return Response(
+            services.month_folders(
+                request_actor(request),
+                company_id,
+                request.query_params.get("period", ""),
+                request.query_params.get("cursor"),
+            )
+        )
 
 
 def health(request):
     from django.db import connection
+
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -313,7 +403,9 @@ def spa(request, resource=""):
         target = root / "index.html"
     if not target.is_file():
         return HttpResponse("Frontend noch nicht gebaut. Siehe README.", status=503)
-    response = FileResponse(target.open("rb"), content_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+    response = FileResponse(
+        target.open("rb"), content_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    )
     if target.name == "index.html":
         response["Cache-Control"] = "no-cache"
     return response

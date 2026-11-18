@@ -37,6 +37,13 @@ Für das private LAN `HTTP_BIND`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MCP_
 5. Unter **Übergabe & Versand** Vorschau prüfen und Paket verbindlich erzeugen. ZIP enthält Originale, CSV, XLSX, Begleitschreiben und Inhaltsliste mit Prüfsummen. Fehlende/ausgeschlossene Unterlagen und Empfänger bleiben sichtbar.
 6. SMTP konfigurieren und den gespeicherten Snapshot ausdrücklich versenden. `SMTP angenommen` ist **keine bestätigte Zustellung**. Ein unbekannter Ausgang wird nicht automatisch erneut gesendet; Neuversand ist eine erkennbare, protokollierte Aktion.
 
+<details>
+<summary>Screenshot aus dem tatsächlichen synthetischen Compose-Browsertest</summary>
+
+![Monatsübergabe mit Paketversion, Inhaltsliste und Versandhistorie](docs/screenshots/uebergabe-desktop.png)
+
+</details>
+
 Originalbytes bleiben unverändert; Ausleseergebnisse sind getrennte, revisionsgeschützte Metadaten. Monatskorrekturen ändern die echte Ablage, aber niemals bereits erzeugte Paket-Snapshots. Nachträge verweisen auf Vorgänger und berücksichtigen deren Revisionsstände.
 
 ## Synthetischer Beispielmonat
@@ -47,7 +54,7 @@ docker compose exec app python backend/manage.py bootstrap \
 # Optional: mit --classified die synthetischen Metadaten bereits freigeben.
 ```
 
-Zwei getrennte Firmen, Bankkonto/Depot, Kategorien sowie AR, ER, Gutschrift, Storno, CAMT + Auszugs-PDF, Wertpapier-PDF und Scanbeleg. Wiederholtes Bootstrap erzeugt keine Dubletten. Unter `DOCUMENTS_ROOT/samples/` liegen zusätzlich die synthetischen Uploaddateien.
+Zwei getrennte Firmen mit **je acht Dokumenten**, Bankkonto/Depot, Kategorien sowie AR, ER, Gutschrift, Storno, CAMT + Auszugs-PDF, Wertpapier-PDF und Scanbeleg. Wiederholtes Bootstrap erzeugt keine Dubletten. Unter `DOCUMENTS_ROOT/samples/` liegen zusätzlich die Uploaddateien der ersten Firma, im Unterordner `Zweite-Firma/` diejenigen der zweiten Firma.
 
 Ein vollständig automatisierter, **echter MCP-/IMAP-/SMTP-Test** benötigt nur das mitgelieferte kontrollierte Mail-Testprofil, keine produktiven Mailzugänge:
 

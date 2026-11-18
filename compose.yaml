@@ -19,6 +19,8 @@ x-app: &app
     MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-http://localhost:*,http://127.0.0.1:*,http://app:8000}
     BOOTSTRAP_DEMO: ${BOOTSTRAP_DEMO:-0}
     DATA_ROOT: /data
+    MAX_FILE_BYTES: "${MAX_FILE_BYTES:-26214400}"
+    MAX_PACKAGE_BYTES: "${MAX_PACKAGE_BYTES:-268435456}"
   volumes:
     - type: bind
       source: ${DOCUMENTS_ROOT:-./var/documents}

@@ -145,6 +145,13 @@ function Editor({ doc }: { doc: Document }) {
         }
       />
       <ErrorAlert error={save.error || assignments.error} />
+      {doc.filing_status === "pending" && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Die Metadaten sind gespeichert, die physische Ablage ist noch
+          ausstehend. Der Worker setzt die journalisierte Dateioperation fort.{" "}
+          {doc.filing_error}
+        </Alert>
+      )}
       {notice && (
         <Alert severity="success" sx={{ mb: 2 }}>
           {notice}

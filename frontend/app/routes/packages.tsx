@@ -253,6 +253,9 @@ export default function Packages() {
                   onClick={() => create.mutate()}
                   disabled={
                     create.isPending ||
+                    shown.count === 0 ||
+                    (!!shown.max_package_bytes &&
+                      shown.bytes > shown.max_package_bytes) ||
                     (!!jobId &&
                       ["queued", "running"].includes(job.data?.status || ""))
                   }
@@ -267,6 +270,15 @@ export default function Packages() {
             {shown.recipients.join(", ") ||
               "Keine hinterlegt – vor Paketbildung in Einstellungen ergänzen."}
           </Typography>
+          {!selectedId &&
+          shown.max_package_bytes &&
+          shown.bytes > shown.max_package_bytes ? (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              Die Originale überschreiten das konfigurierte Paketlimit von{" "}
+              {bytes(shown.max_package_bytes)}. Weniger Monate auswählen oder
+              das Betriebslimit bewusst anpassen.
+            </Alert>
+          ) : null}
           {shown.parent_id && (
             <Alert severity="info" sx={{ mb: 2 }}>
               Nachtrag zu {shown.parent_id}. {shown.unchanged.length}{" "}
@@ -293,7 +305,7 @@ export default function Packages() {
             </Alert>
           )}
           <TableContainer>
-            <Table size="small">
+            <Table size="small" sx={{ minWidth: 650 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Original</TableCell>

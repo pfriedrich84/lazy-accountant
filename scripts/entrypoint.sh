@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 umask 077
+if [ "$(id -u)" = "0" ]; then
+  echo "App/Worker nicht als root starten. APP_UID/APP_GID und Host-Ablagerechte prüfen." >&2
+  exit 1
+fi
 case "${1:-web}" in
   web)
     python backend/manage.py migrate --noinput
