@@ -4,7 +4,11 @@ Schlanke, selbst betriebene Dokumentensammlung und Übergabe an die Steuerberatu
 
 ## Plan
 
-Der [Funktionskatalog und Umsetzungsplan](docs/PLAN.md) beschreibt den vereinbarten Umfang. Aktuell enthält dieses Repository die Planung; die Anwendung und die Skills sind noch zu implementieren.
+Der [Funktionskatalog und Umsetzungsplan](docs/PLAN.md) beschreibt den vereinbarten Umfang.
+
+**Entwicklungsstart:** [GitHub-Issue #1 – vollständiger Implementierungsauftrag](https://github.com/pfriedrich84/lazy-accountant/issues/1), einschließlich Framework-Stack, Arbeitsschritten, vollständigem Planstand und Abnahmekriterien.
+
+Festgelegter Stack: Django mit Django REST Framework und PostgreSQL; React/TypeScript mit React Router, Material UI und TanStack Query; Django-Q2 für Hintergrundjobs und das offizielle Python-MCP-SDK. Aktuell enthält dieses Repository die Planung; die Anwendung und die Skills sind noch zu implementieren.
 
 Die erste Version umfasst:
 
