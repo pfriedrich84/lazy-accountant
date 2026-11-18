@@ -175,7 +175,42 @@ Vorgeschlagener einfacher Betriebsaufbau:
 
 Docker Compose soll den gesamten Kernbetrieb starten. Kein Kubernetes und keine zusätzlichen Queue-/Objektspeicherdienste als Voraussetzung für die erste Version. Datenbankgestützte Jobs müssen Neustarts, Sperren und Wiederaufnahme beherrschen.
 
-Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne echte Zugangsdaten, dokumentierte Konfiguration, Healthchecks, Migrationen sowie Backup-/Restore-Anleitung. Datenbank und Dokumentdateien werden konsistent gesichert und gemeinsam wiederherstellbar gehalten. Weboberfläche, API und MCP werden ausschließlich intern über HTTP bereitgestellt. Ein TLS-Reverse-Proxy und eine Domain sind keine Startvoraussetzung. Die Datenbank bleibt im internen Compose-Netz. Die Anwendungsauthentifizierung und die Firmen-/Funktionsrechte gelten unabhängig vom HTTP-Transport weiter. Zugangsdaten werden nicht in Git oder Protokollen abgelegt. Konkrete Sprach-/Frameworkwahl und Ressourcenwerte werden vor der Implementierung festgelegt.
+Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne echte Zugangsdaten, dokumentierte Konfiguration, Healthchecks, Migrationen sowie Backup-/Restore-Anleitung. Datenbank und Dokumentdateien werden konsistent gesichert und gemeinsam wiederherstellbar gehalten. Weboberfläche, API und MCP werden ausschließlich intern über HTTP bereitgestellt. Ein TLS-Reverse-Proxy und eine Domain sind keine Startvoraussetzung. Die Datenbank bleibt im internen Compose-Netz. Die Anwendungsauthentifizierung und die Firmen-/Funktionsrechte gelten unabhängig vom HTTP-Transport weiter. Zugangsdaten werden nicht in Git oder Protokollen abgelegt. Die Frameworkwahl ist in Abschnitt 7.1 festgelegt; konkrete kompatible Versionen und Ressourcenwerte werden bei Implementierungsstart dokumentiert.
+
+### 7.1 Festgelegte Frameworks und Wiederverwendung
+
+Die Anwendung nutzt etablierte Framework-Funktionen für Infrastruktur und Standardabläufe; individuell implementiert werden die fachlichen Regeln der Dokumentzuordnung und Übergabe.
+
+| Bereich | Festlegung |
+| --- | --- |
+| Python-Backend | Django 5.2 LTS mit aktuellem kompatiblem Patchstand und Django REST Framework |
+| Datenbankzugriff | Django ORM, Django-Migrationen und PostgreSQL; keine zweite ORM-/Migrationsschicht |
+| Benutzer und Administration | Django Auth, Sessions, Berechtigungen und Django Admin; Admin ergänzt die eigentliche Benutzeroberfläche |
+| Weboberfläche | React und TypeScript; React Router im Framework Mode mit SPA-Konfiguration und Vite-Build |
+| UI-Komponenten | Material UI mit frei nutzbaren Komponenten für Formulare, Tabellen, Navigation und Dialoge |
+| Serverdaten im Frontend | TanStack Query für Abruf, Mutationen, Statusaktualisierung und Cache-Invalidierung |
+| Hintergrundjobs | Django-Q2 mit Django-ORM-Broker in PostgreSQL; Worker als separater Compose-Service |
+| E-Mail-Versand | Django-Mail-Backend für SMTP; IMAP mit bewährter Bibliothek bzw. Python-Standardbibliothek als Importadapter |
+| MCP | Offizielles modelcontextprotocol/python-sdk; Streamable HTTP, eingebunden über ASGI neben Django |
+| Prüfungen | Django-/pytest-django-Tests, Frontend-Typprüfung und Tests mit Vitest/Testing Library sowie Browser-Smoke und Compose-Smoke |
+
+Django wurde wegen der integrierten Benutzerverwaltung, Administration, ORM und Migrationen gewählt. Für die datenorientierte Weboberfläche wird React mit einer fertigen Komponentenbibliothek verwendet. Eine Flutter-Oberfläche ist für diesen ersten Web-Lieferumfang nicht vorgesehen.
+
+MCP und REST verwenden denselben fachlichen Service-Layer. Die ASGI-Integration berücksichtigt den MCP-Lifecycle, explizite erlaubte interne Hosts und Authentifizierung auch an der MCP-Route. Frontend, API und MCP werden unter einer internen HTTP-Origin bereitgestellt; ein Node-Server ist im Laufbetrieb der SPA nicht erforderlich.
+
+Django-Q2 übernimmt die Queue-Technik. Fachliche Versand-/Paketstatus, Idempotenz und der Umgang mit unbekanntem SMTP-Ausgang bleiben ausdrücklich implementiert. Retry-/Timeout-Konfiguration muss Doppelverarbeitung berücksichtigen. Orca Server bleibt der Auslöser des Monatslaufs; der Queue-Scheduler übernimmt diese Planung nicht.
+
+Die derzeit verfügbaren stabilen und zueinander kompatiblen Releases sind bei Umsetzung zu prüfen und in Lockfiles festzuhalten. Begründete Inkompatibilitäten werden dokumentiert und innerhalb dieses Stacks gelöst; Routineentscheidungen erfordern keine weitere Grundsatzabstimmung.
+
+Offizielle Grundlagen:
+
+- [Django: integrierte Funktionen](https://www.djangoproject.com/start/) und [Supportstände](https://www.djangoproject.com/download/)
+- [Django REST Framework](https://www.django-rest-framework.org/)
+- [React Router: SPA Mode](https://reactrouter.com/how-to/spa)
+- [Material UI](https://mui.com/material-ui/getting-started/)
+- [TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview)
+- [Django-Q2: ORM-Broker](https://django-q2.readthedocs.io/en/master/configure.html#orm)
+- [Offizielles MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
 
 ## 8. Reihenfolge und Abnahmekriterien
 
@@ -207,7 +242,7 @@ Der Coding-Agent kann mit Etappe 1 beginnen. Die fachlichen Anforderungen, Ordne
 
 ### Technische Umsetzung ohne weitere Grundsatzentscheidung
 
-- Ausgangspunkt: Python-Backend, PostgreSQL und eine schlanke Weboberfläche. Konkrete Frameworks, Bibliotheken und unterstützte Versionen wählt der Coding-Agent passend zum Umfang und dokumentiert die Wahl kurz im Repository.
+- Festgelegter Stack: Django 5.2 LTS mit Django REST Framework, Django ORM/Migrationen/Auth/Admin, PostgreSQL, React/TypeScript mit React Router (Framework Mode, SPA über Vite), Material UI und TanStack Query. Hintergrundjobs verwenden Django-Q2 mit ORM-Broker. MCP nutzt das offizielle Python-SDK. Kompatible stabile Patch-/Paketversionen werden bei Implementierungsstart geprüft, fest gepinnt und mit Lockfiles dokumentiert.
 - Ein Benutzerkonto mit mehreren getrennten Firmen genügt zunächst. Oberfläche und MCP erhalten eine einfache dokumentierte Authentifizierung und dieselben fachlichen Berechtigungen.
 - Originaldateien liegen in einem konfigurierbaren Hostordner, der über einen Docker-Compose-Bind-Mount eingebunden wird. Darunter gilt die festgelegte Firmen-/Jahres-/Monatsstruktur. Paket-Snapshots und Eingangsablage haben eigene technische Bereiche.
 - Vorschlag für die initiale Monatszuordnung: Rechnungen nach Belegdatum, Konto-/Depotunterlagen nach Auszugsmonat bzw. Ende des Auszugszeitraums. Unsicherheit, mehrmonatige Unterlagen und manuelle Korrekturen bleiben sichtbar und übersteuerbar; das Datum eines Imports bestimmt nicht automatisch den Belegmonat.
