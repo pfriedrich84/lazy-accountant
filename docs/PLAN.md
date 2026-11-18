@@ -33,6 +33,7 @@ Die erste Version bereitet Unterlagen vor. Sie benötigt weder eine vollständig
 | F17 | Monatlich noch nicht verrechnete Projektleistungen zu Rechnungsentwürfen zusammenfassen; Abrechnungsstand führen | Später |
 | F18 | BMD-/RZL-Export und strukturierte E-Rechnungen nach konkretem Bedarf | Später |
 | F19 | Versionierte, agentenübergreifend nutzbare Skills für Dokumentauslese, Sortierung und Monatsübergabe mitliefern | Erste Version |
+| F20 | Dokumente physisch und in der Oberfläche unter /Firma/Jahr/Monat/ mit den Unterordnern ER, AR, Bankkonto und Wertpapiere ablegen; dieselbe Struktur im Export erhalten | Erste Version |
 
 ## 3. Dokumente und Verarbeitung
 
@@ -48,6 +49,25 @@ Gemeinsame Angaben: Firma, Dokumentart, Originaldateiname, interne ID, Herkunft,
 - Dateigleiche Uploads werden per Hash erkannt; ähnliche Rechnungsnummern/Beträge erzeugen einen Dublettenhinweis. Gleiche Beträge allein sind kein Löschgrund.
 - Ungeklärte Firma, Dokumentart oder Periode führt in eine Prüfliste. Der Import rät keine endgültige Zuordnung.
 - Dokumente sind nach Firma, Zeitraum, Art, Geschäftspartner, Status und Kategorie filterbar.
+
+### 3.1 Verbindliche Ordnerstruktur
+
+Die Ablage erfolgt als echte Ordnerstruktur im persistenten Dokument-Volume und ist in der Oberfläche sowie über MCP sichtbar. Sie ist keine reine Kategorie- oder Filteransicht. Der in Docker Compose gemountete Ablagestamm enthält je Firma folgende Pfade; Jahr wird vierstellig und Monat zweistellig (01–12) geschrieben:
+
+| Pfad relativ zum Ablagestamm | Inhalt |
+| --- | --- |
+| /Firma/Jahr/Monat/ER/ | Eingangsrechnungen, Eingangsgutschriften und zugehörige Ausgabenbelege |
+| /Firma/Jahr/Monat/AR/ | Ausgangsrechnungen und Ausgangsstornos, zunächst importierte Original-PDFs aus Invoice Ninja |
+| /Firma/Jahr/Monat/Bankkonto/ | CAMT-Originaldateien und PDF-Kontoauszüge |
+| /Firma/Jahr/Monat/Wertpapiere/ | PDF-Unterlagen zu Wertpapierbewegungen |
+
+Beispiele: /Beispiel-GmbH/2026/11/ER/, /Beispiel-GmbH/2026/11/AR/, /Beispiel-GmbH/2026/11/Bankkonto/ und /Beispiel-GmbH/2026/11/Wertpapiere/. Die vier Monatsordner werden auch bei fehlenden Dokumenten angelegt und im vollständigen Paket beibehalten.
+
+Der zugeordnete Ablage-/Übergabemonat bestimmt Jahr und Monat des Pfads. Belegdatum und Auszugszeitraum bleiben als eigenständige Angaben erhalten. Firmenordner verwenden konfigurierte, eindeutige und dateisystemsichere Namen. Dateinamen werden ebenfalls sicher und kollisionsfrei gebildet; der Originaldateiname bleibt zusätzlich gespeichert. Bei mehreren Konten oder Depots bleibt die konkrete Zuordnung in Metadaten und Übersicht nachvollziehbar.
+
+Neue, noch nicht sicher zugeordnete Uploads und E-Mail-Anhänge liegen zunächst in einer technischen Eingangsablage. Nach der Klassifikation ordnet die Anwendung sie dem verbindlichen Firmen-/Monats-/Dokumentordner zu. Der Agent schreibt die Zuordnung über MCP; die Anwendung leitet den Pfad deterministisch daraus ab und führt die Ablage aus. Freie Dateisystempfade aus Agenten- oder Dokumenttexten werden nicht übernommen.
+
+Umklassifizierungen und Monatskorrekturen aktualisieren Ordner und Metadaten gemeinsam, ohne die Originalbytes zu verändern. Bereits erzeugte Paket-Snapshots bleiben unverändert. Das Übergabe-ZIP enthält dieselbe Hierarchie /Firma/Jahr/Monat/ER, AR, Bankkonto und Wertpapiere. Mehrmonatige Pakete enthalten jeden Monat getrennt; Nachträge behalten ebenfalls diese Struktur. Begleitschreiben, Übersichten und Inhaltsliste werden als zusätzliche Dateien im jeweiligen Monatsordner abgelegt.
 
 ## 4. E-Mail: IMAP für Eingang, SMTP für Versand
 
@@ -159,7 +179,7 @@ Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne ec
 4. Paketvorschau, ZIP/Übersichten, SMTP-Versand und Nachträge.
 5. Vollständiger Agentendurchlauf mit den Skills; Docker-Compose-Betrieb und Wiederherstellung ohne interne KI-Anbindung.
 
-Abnahme anhand eines vollständigen Testmonats mit zwei Firmen: Invoice-Ninja-Ausgangsrechnung als PDF, Eingangsrechnung, Gutschrift, CAMT samt passendem PDF-Auszug und Wertpapierbewegung als PDF. Alle Originale erscheinen unter der richtigen Firma und Periode im Paket. Eine E-Mail mit mehreren Anhängen wird bei wiederholtem Abruf und nach Neustart nur einmal importiert. Fehlerhafte Auslese verliert keine Datei. Ein Agent kann über MCP alle neuen Dokumente vollständig auflisten, lesen, klassifizieren und seine Ergebnisse speichern; ein zweiter unveränderter Skill-Durchlauf legt nichts doppelt an. Unklare Firmenzuordnungen, abweichende Summen und zwischenzeitliche manuelle Korrekturen bleiben geschützt und sichtbar. Der Server startet ohne eigene LLM-Zugangsdaten. Wiederholte MCP-Aufträge erzeugen keinen Doppelversand. Ein Nachtrag ist vom ursprünglichen Paket unterscheidbar. Versandfehler und unbekannter Versandausgang bleiben sichtbar. Backup und Restore stellen Dokumente, Zuordnungen und Paketstände wieder her.
+Abnahme anhand eines vollständigen Testmonats mit zwei Firmen: Invoice-Ninja-Ausgangsrechnung als PDF, Eingangsrechnung, Gutschrift, CAMT samt passendem PDF-Auszug und Wertpapierbewegung als PDF. Alle Originale erscheinen unter der richtigen Firma und Periode im Paket und liegen sowohl im persistenten Dokument-Volume als auch im ZIP unter /Firma/Jahr/Monat/ER, AR, Bankkonto oder Wertpapiere. Die vier Monatsordner bleiben getrennt, CAMT und PDF liegen gemeinsam unter Bankkonto; Monatskorrekturen verändern keine bereits versendeten Pakete. Eine E-Mail mit mehreren Anhängen wird bei wiederholtem Abruf und nach Neustart nur einmal importiert. Fehlerhafte Auslese verliert keine Datei. Ein Agent kann über MCP alle neuen Dokumente vollständig auflisten, lesen, klassifizieren und seine Ergebnisse speichern; ein zweiter unveränderter Skill-Durchlauf legt nichts doppelt an. Unklare Firmenzuordnungen, abweichende Summen und zwischenzeitliche manuelle Korrekturen bleiben geschützt und sichtbar. Der Server startet ohne eigene LLM-Zugangsdaten. Wiederholte MCP-Aufträge erzeugen keinen Doppelversand. Ein Nachtrag ist vom ursprünglichen Paket unterscheidbar. Versandfehler und unbekannter Versandausgang bleiben sichtbar. Backup und Restore stellen Dokumente, Zuordnungen und Paketstände wieder her.
 
 ### Etappe 2 – Eigene Rechnungen und Bankabgleich
 
