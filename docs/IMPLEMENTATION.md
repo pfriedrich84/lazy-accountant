@@ -91,4 +91,10 @@ Der nachgeschaltete offizielle MCP-Client hat jetzt auch **denselben ursprüngli
 
 Letzte Eingabehärtung: UTF-8-Dateinamen werden nach Bytes statt Zeichen begrenzt und behalten ihre Erweiterung; vollständiger gültiger Originalname bleibt erhalten. Ungültige/überlange Originalnamen werden explizit abgelehnt statt still abgeschnitten; fehlerhafte Mailheader werden JSONB-sicher sichtbar escaped, abgelehnte Anhangsbytes bleiben erhalten. Regression mit langem japanischem Namen, Nullbyte/ungültigem Unicode und fehlerhaftem Mailheader auf PostgreSQL bestanden.
 
+### Letzter vollständiger Stand
+
+[CI-Lauf 44420245553](https://github.com/pfriedrich84/lazy-accountant/actions/runs/44420245553), Commit `c55defd`: **60 PostgreSQL-Tests, Frontend-Typprüfung/5 Tests/Build sowie der gesamte Compose-/3-Browserfälle-/Worker-/Backup-/Restore-/MCP-Replay-Lauf erfolgreich**. Der README-Screenshot stammt aus dessen tatsächlichem vollständigen Beispielmonat (ausschließlich synthetische Daten).
+
+Die Oberfläche übernimmt eine **ungeklärte Firma nicht mehr aus dem globalen Anzeigekontext**: Das Detailformular bleibt ausdrücklich „Ungeklärt“, bis der Benutzer nach Originalprüfung selbst eine Firma wählt. Der zentrale Desktop-/Mobil-Browsertest importiert nun absichtlich in diesen persönlichen Eingang und prüft die bewusste Zuordnung; lokal erneut alle **3 Browserfälle erfolgreich**.
+
 Noch offen ist ausschließlich die kundenspezifische Live-Einrichtung gemäß Betriebsdokumentation: realer Host/Speicher, echte Firmendaten/Mailanbieter/Empfänger, repräsentative anonymisierte Originale und tatsächlicher Orca-Agent/Termin. Der synthetische Client behauptet keinen produktiven Orca-Lauf. Weitere ausgeführte Prüfungen werden ergänzt.

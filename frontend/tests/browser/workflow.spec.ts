@@ -88,6 +88,10 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
     page.getByRole("button", { name: "Büro bearbeiten", exact: true }),
   ).toBeVisible();
   await navigate(page, "Dokumenteingang");
+  await page.getByLabel("Eingang", { exact: true }).click();
+  await page
+    .getByRole("option", { name: "Firma ungeklärt", exact: true })
+    .click();
   await page
     .getByLabel("Dokumentdateien")
     .setInputFiles(path.resolve("../var/samples/eingang.pdf"));
@@ -96,6 +100,12 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
   await expect(
     page.getByRole("heading", { name: "eingang.pdf" }),
   ).toBeVisible();
+  const documentCompany = page
+    .getByRole("main")
+    .getByLabel("Firma", { exact: true });
+  await expect(documentCompany).toHaveText("Ungeklärt");
+  await documentCompany.click();
+  await page.getByRole("option", { name: company, exact: true }).click();
   await page.getByLabel("Dokumentart", { exact: true }).click();
   await page
     .getByRole("option", { name: "Eingangsrechnung", exact: true })

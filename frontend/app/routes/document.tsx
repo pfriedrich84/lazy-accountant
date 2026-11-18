@@ -28,15 +28,10 @@ import { ErrorAlert, Heading, Loading, Status } from "../components";
 import { useApp } from "./shell";
 
 function Editor({ doc }: { doc: Document }) {
-  const {
-    companies,
-    companyId: activeCompany,
-    period: activePeriod,
-  } = useApp();
+  const { companies, period: activePeriod } = useApp();
   const cache = useQueryClient();
-  const [companyId, setCompanyId] = useState(
-    doc.company_id || activeCompany || "",
-  );
+  // Global viewing context is not evidence of an unassigned document's owner.
+  const [companyId, setCompanyId] = useState(doc.company_id || "");
   const [kind, setKind] = useState(doc.kind || "");
   const [period, setPeriod] = useState(doc.period || "");
   const [accountId, setAccountId] = useState<number | "">(doc.account_id || "");
@@ -306,6 +301,15 @@ function Editor({ doc }: { doc: Document }) {
               <TextField
                 select
                 label="Firma"
+                slotProps={{
+                  select: { displayEmpty: true },
+                  inputLabel: { shrink: true },
+                }}
+                helperText={
+                  !companyId
+                    ? "Firma ist ungeklärt – Original prüfen und bewusst auswählen."
+                    : undefined
+                }
                 value={companyId}
                 onChange={(e) => {
                   setCompanyId(e.target.value ? Number(e.target.value) : "");
