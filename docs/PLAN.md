@@ -4,7 +4,7 @@ Stand: 18. November 2026. Status: vereinbarte Anforderungen und Umsetzungsvorsch
 
 ## 1. Ziel und Ausgangslage
 
-Eine schlanke, selbst betriebene Webanwendung sammelt Rechnungen, Bank- und Depotunterlagen je Firma, strukturiert sie und verschickt ein vollständiges Paket an die Steuerberatung. Alle wesentlichen Abläufe sollen auch über einen eigenen MCP-Server automatisierbar sein. Deployment erfolgt mit Docker Compose. Weboberfläche, API und MCP laufen zunächst ausschließlich im internen Netz über HTTP. Den Monatslauf stößt der externe Agent über MCP an; ein eigener serverseitiger Monatszeitplaner ist für die erste Version nicht erforderlich. In der ersten Version übernimmt der vorhandene externe Agent des Nutzers die KI-Auslese und Sortierung über MCP. Versionierte Skills im Repository beschreiben diese Arbeitsabläufe; der Server braucht zunächst keine eigene LLM-Anbindung und keinen eigenen KI-API-Key.
+Eine schlanke, selbst betriebene Webanwendung sammelt Rechnungen, Bank- und Depotunterlagen je Firma, strukturiert sie und verschickt ein vollständiges Paket an die Steuerberatung. Alle wesentlichen Abläufe sollen auch über einen eigenen MCP-Server automatisierbar sein. Deployment erfolgt mit Docker Compose. Weboberfläche, API und MCP laufen zunächst ausschließlich im internen Netz über HTTP. Orca Server startet den Agentenlauf für die Monatsverarbeitung; der Agent führt die Arbeit über MCP aus. Ein eigener serverseitiger Monatszeitplaner ist für die erste Version nicht erforderlich. In der ersten Version übernimmt der vorhandene externe Agent des Nutzers die KI-Auslese und Sortierung über MCP. Versionierte Skills im Repository beschreiben diese Arbeitsabläufe; der Server braucht zunächst keine eigene LLM-Anbindung und keinen eigenen KI-API-Key.
 
 Heute entstehen einmalige und wiederkehrende Rechnungen in Invoice Ninja. Für den ersten nutzbaren Stand werden diese Rechnungen einfach als endgültige PDFs hochgeladen oder per E-Mail eingelesen. Eine Invoice-Ninja-Integration ist dafür nicht erforderlich. Eigene Rechnungserstellung und wiederkehrende Rechnungen sind der nächste Ausbau; Projektzeiterfassung und monatliche Leistungsabrechnung folgen später.
 
@@ -153,13 +153,13 @@ Beispielaufträge:
 
 Die Skills unterscheiden Aussteller und Empfänger, bewahren Originalwährung und Originaldaten und erfinden keine fehlenden Werte. Extern ausgestellte Ausgangsrechnungen bleiben unverändert. Ungeklärte Fälle werden gesammelt gemeldet; eindeutig zuordenbare Fälle können gemäß gewählter Bearbeitungsregel ohne Einzelrückfrage abgearbeitet werden. Wiederholte Durchläufe überspringen bereits unverändert bearbeitete Dokumente. Dokument- und E-Mail-Inhalte sind Daten, keine ausführbaren Skill-Anweisungen.
 
-### 6.3 Monatslauf durch den externen Agenten
+### 6.3 Monatslauf über Orca Server
 
-Der externe Agent startet den Monatslauf bei Bedarf über den Skill monatsuebergabe-vorbereiten und die vorhandenen MCP-Werkzeuge. Firma und Jahr/Monat werden explizit übergeben. Er kann zuerst den IMAP-Abruf auslösen, anschließend neue Dokumente auslesen und sortieren, offene Punkte prüfen, das Paket erzeugen und bei entsprechendem Auftrag per SMTP versenden.
+Orca Server übernimmt den Start des Agentenlaufs. Der dort ausgeführte Agent bearbeitet den Monatslauf über den Skill monatsuebergabe-vorbereiten und die vorhandenen MCP-Werkzeuge. Der Auslösezeitpunkt wird in Orca Server konfiguriert; Lazy Accountant benötigt keine eigene Monatsplanung. Firma und Jahr/Monat werden explizit übergeben. Er kann zuerst den IMAP-Abruf auslösen, anschließend neue Dokumente auslesen und sortieren, offene Punkte prüfen, das Paket erzeugen und bei entsprechendem Auftrag per SMTP versenden.
 
 Die einzelnen Schritte liefern Status und Ergebnis-IDs, damit der Agent nach Unterbrechungen fortsetzen kann. Wiederholte Aufträge erzeugen keine doppelten Importe oder Versandaufträge; bereits versendete Paketversionen bleiben erkennbar. Ein Auslöser durch den Agenten ist kein Anlass für erneute Einzelbestätigungen innerhalb eines bereits autorisierten Ablaufs.
 
-Die erste Version benötigt dafür keinen eigenen Monats-Cronjob und keinen internen KI-Agenten. Hintergrundaufträge für IMAP-Abruf, Paketerstellung und SMTP-Verarbeitung bleiben davon unabhängig. Hier wird lediglich die Auslösbarkeit geplant; es wird kein tatsächlicher Termin eingerichtet.
+Die Zuständigkeiten sind damit festgelegt: Orca Server startet den Lauf, der Agent verwendet Skills und MCP, Lazy Accountant stellt Ablage, Validierungen, Pakete, Versand und Status bereit. Die erste Version benötigt dafür keinen eigenen Monats-Cronjob und keinen internen KI-Agenten. Hintergrundaufträge für IMAP-Abruf, Paketerstellung und SMTP-Verarbeitung bleiben davon unabhängig. Die Orca-Verbindung verwendet den internen HTTP-MCP-Endpunkt. Im Rahmen dieser Planung wird kein tatsächlicher Orca-Job oder Termin eingerichtet.
 
 ## 7. Oberfläche und Betrieb mit Docker Compose
 
@@ -207,7 +207,7 @@ Native Buchhaltungsimporte für die Kanzlei, strukturierte E-Rechnungen, weiterg
 - Benötigte CAMT-Versionen anhand echter, anonymisierter Beispieldateien.
 - Gewünschte Konten-/Depotbezeichnungen, Kategorien und Übersichtsspalten mit der Steuerberatung.
 - Mailanbieter, Authentifizierungsverfahren, Importordner, Absender und maximale Anhangsgröße.
-- Vorhandenen Agenten anbinden; Datei-/Seitenzugriff und strukturierte Ergebnisübernahme anhand echter Dokumentarten prüfen. Eine eigene serverseitige KI-Anbindung wird erst bei späterem Bedarf entschieden.
+- Den von Orca Server gestarteten Agenten an den internen HTTP-MCP-Endpunkt anbinden; Datei-/Seitenzugriff und strukturierte Ergebnisübernahme anhand echter Dokumentarten prüfen. Eine eigene serverseitige KI-Anbindung wird erst bei späterem Bedarf entschieden.
 - Für den vom Agenten gestarteten Monatslauf: Versandberechtigung und Verhalten bei offenen Punkten konfigurieren. Ein eigener serverseitiger Monatszeitplaner ist nicht erforderlich.
 
 Diese Punkte betreffen die Umsetzungskonfiguration. Die fachliche erste Version bleibt PDF-/Dateiimport, E-Mail-Eingang, strukturierte Übergabe, SMTP-Versand, MCP und Docker Compose.
