@@ -4,7 +4,7 @@ Stand: 18. November 2026. Status: vereinbarte Anforderungen und Umsetzungsvorsch
 
 ## 1. Ziel und Ausgangslage
 
-Eine schlanke, selbst betriebene Webanwendung sammelt Rechnungen, Bank- und Depotunterlagen je Firma, strukturiert sie und verschickt ein vollständiges Paket an die Steuerberatung. Alle wesentlichen Abläufe sollen auch über einen eigenen MCP-Server automatisierbar sein. Deployment erfolgt mit Docker Compose.
+Eine schlanke, selbst betriebene Webanwendung sammelt Rechnungen, Bank- und Depotunterlagen je Firma, strukturiert sie und verschickt ein vollständiges Paket an die Steuerberatung. Alle wesentlichen Abläufe sollen auch über einen eigenen MCP-Server automatisierbar sein. Deployment erfolgt mit Docker Compose. In der ersten Version übernimmt der vorhandene externe Agent des Nutzers die KI-Auslese und Sortierung über MCP. Versionierte Skills im Repository beschreiben diese Arbeitsabläufe; der Server braucht zunächst keine eigene LLM-Anbindung und keinen eigenen KI-API-Key.
 
 Heute entstehen einmalige und wiederkehrende Rechnungen in Invoice Ninja. Für den ersten nutzbaren Stand werden diese Rechnungen einfach als endgültige PDFs hochgeladen oder per E-Mail eingelesen. Eine Invoice-Ninja-Integration ist dafür nicht erforderlich. Eigene Rechnungserstellung und wiederkehrende Rechnungen sind der nächste Ausbau; Projektzeiterfassung und monatliche Leistungsabrechnung folgen später.
 
@@ -17,7 +17,7 @@ Die erste Version bereitet Unterlagen vor. Sie benötigt weder eine vollständig
 | F01 | Mehrere Firmen mit getrennten Dokumenten, Konto-/Depotzuordnungen, Mailkonfiguration und Steuerberater-Empfängern | Erste Version |
 | F02 | Ausgangsrechnungen und Stornos als bereits ausgestellte PDFs importieren; Rechnungsnummer und Original erhalten | Erste Version |
 | F03 | Eingangsrechnungen und sonstige Belege als PDF, JPG und PNG einzeln oder gesammelt hochladen | Erste Version |
-| F04 | Belege auslesen und strukturieren; Lieferant/Kunde, Nummer, Datum, Beträge, Währung und Kategorie korrigierbar erfassen | Erste Version |
+| F04 | Externem Agenten Originale über MCP zugänglich machen und strukturierte Auslese-/Sortierergebnisse validiert speichern; Lieferant/Kunde, Nummer, Datum, Beträge, Währung und Kategorie korrigierbar erfassen | Erste Version |
 | F05 | Kontoauszüge als CAMT-XML und PDF importieren, Konto und Auszugszeitraum zuordnen; beide Originalformate erhalten | Erste Version |
 | F06 | Wertpapierbewegungen als PDF importieren und Firma, Depot und Zeitraum zuordnen | Erste Version |
 | F07 | Dokumente suchen, filtern, kommentieren, prüfen und umklassifizieren; Dubletten erkennen | Erste Version |
@@ -32,6 +32,7 @@ Die erste Version bereitet Unterlagen vor. Sie benötigt weder eine vollständig
 | F16 | Projekte, Tätigkeiten, Zeiten und Verrechnungssätze erfassen | Später |
 | F17 | Monatlich noch nicht verrechnete Projektleistungen zu Rechnungsentwürfen zusammenfassen; Abrechnungsstand führen | Später |
 | F18 | BMD-/RZL-Export und strukturierte E-Rechnungen nach konkretem Bedarf | Später |
+| F19 | Versionierte, agentenübergreifend nutzbare Skills für Dokumentauslese, Sortierung und Monatsübergabe mitliefern | Erste Version |
 
 ## 3. Dokumente und Verarbeitung
 
@@ -43,7 +44,7 @@ Gemeinsame Angaben: Firma, Dokumentart, Originaldateiname, interne ID, Herkunft,
 - Dokumentdatum und Übergabezeitraum sind getrennte Felder. Importierte Ausgangsrechnungen werden nicht neu nummeriert oder neu aufgebaut.
 - CAMT und PDF desselben Auszugs können verknüpft werden; beide bleiben im Paket. Der reine CAMT-Import setzt keinen automatischen Bankabgleich voraus.
 - Wertpapierbewegungen benötigen zunächst PDF-Ablage und Zuordnung. Automatische Transaktionsauswertung oder Steuerberechnung ist kein Abnahmekriterium.
-- Automatische Auslese liefert korrigierbare Vorschläge. Unsichere Felder bleiben sichtbar offen; ein Auslesefehler verhindert nicht die sichere Originalablage.
+- Der externe Agent liest die Originale und liefert strukturierte, korrigierbare Ergebnisse über MCP. Unsichere Felder bleiben sichtbar offen; ein Auslesefehler verhindert nicht die sichere Originalablage. Der Server prüft Formate, Rechte und Rechenbeziehungen unabhängig vom Modell.
 - Dateigleiche Uploads werden per Hash erkannt; ähnliche Rechnungsnummern/Beträge erzeugen einen Dublettenhinweis. Gleiche Beträge allein sind kein Löschgrund.
 - Ungeklärte Firma, Dokumentart oder Periode führt in eine Prüfliste. Der Import rät keine endgültige Zuordnung.
 - Dokumente sind nach Firma, Zeitraum, Art, Geschäftspartner, Status und Kategorie filterbar.
@@ -93,8 +94,8 @@ Geplante Werkzeuge für die erste Version:
 | Werkzeuggruppe | Aktionen |
 | --- | --- |
 | Firmen und Zuordnungen | Berechtigte Firmen, Konten, Depots und Kategorien auflisten |
-| Dokumente | Upload vorbereiten/abschließen, Dokumente auflisten/abrufen, Metadaten und Zuordnungen ändern |
-| Verarbeitung | Auslese anstoßen, Vorschläge prüfen/bestätigen, offene Punkte und Dubletten anzeigen |
+| Dokumente | Upload vorbereiten/abschließen, paginiert auflisten/abrufen, Originaldatei und verfügbare Text-/Seitenansichten lesen, Metadaten und Zuordnungen ändern |
+| Verarbeitung | Dokumente zur Bearbeitung übernehmen, strukturierte Auslese-/Klassifikationsergebnisse speichern, Vorschläge prüfen/bestätigen, offene Punkte und Dubletten anzeigen |
 | Mailimport | Konfigurierten IMAP-Abruf starten und Importstatus abfragen |
 | Übergabe | Paketvorschau erstellen, Paket erzeugen, Status und Inhaltsliste abrufen |
 | Versand | Bestehende Paketversion an konfigurierte Empfänger senden und Versandstatus abfragen |
@@ -103,6 +104,35 @@ Große Originaldateien werden über einen authentifizierten Datei-Transfer über
 
 Später kommen Werkzeuge für Rechnungsentwurf, Finalisierung, Versand, wiederkehrende Rechnungen, Projekte, Zeiten und monatliche Abrechnung hinzu. Deterministische Fachlogik berechnet Rechnungsbeträge; KI dient der Auslese und Vorbereitung.
 
+### 6.1 Vertrag zwischen Agent und Anwendung
+
+Der Agent entscheidet anhand des Dokumentinhalts; die Anwendung bleibt die führende Ablage. Der Server bietet dokumentierte Eingabe-/Ausgabeschemas und speichert Bearbeiter, Zeitpunkt, Ausgangsversion und Herkunft eines Ergebnisses. Gleichzeitige Bearbeitung darf neuere manuelle Korrekturen nicht überschreiben.
+
+Rechnungsergebnisse enthalten: Dokument-ID, Ausgangsversion, Dokumentart, Firma, Aussteller, Empfänger, Rechnungsnummer, Rechnungsdatum, optional Leistungs-/Fälligkeitsdatum, Währung, Netto/Steuer/Brutto sowie Steueraufteilungen, Kategorie, Übergabezeitraum und konkrete offene Punkte. Nicht erkennbare Werte bleiben leer. Für wesentliche erkannte Felder werden verfügbare Belegstellen wie Seite/Textausschnitt mitgeliefert; Unsicherheit ist pro Feld bzw. Zuordnung sichtbar.
+
+Bank-/Depotunterlagen verwenden eigene Ergebnisfelder wie Konto/Depot, Auszugszeitraum und Dokumentunterart. CAMT wird strukturell eingelesen, statt Beträge aus dem XML durch ein Sprachmodell neu berechnen zu lassen. Bei Wertpapier-PDFs genügt zunächst die korrekte Dokumentzuordnung; Kauf-/Verkaufsabrechnungen oder Ertragsmitteilungen dürfen als Unterart erfasst werden.
+
+Der Server validiert Pflichtfelder je Dokumentart, Datums-/Währungsformate, erlaubte Kategorien sowie Summen mit Währungsrundung. Unplausible oder unvollständige Ergebnisse erhalten einen Prüfstatus mit Grund. Ein hoher modellseitiger Vertrauenswert ersetzt keine Prüfung. Firmenzuordnung nutzt bekannte Firmendaten und Empfänger-/Kontomerkmale; der Absender allein genügt nicht.
+
+### 6.2 Mitgelieferte Skills
+
+Die Implementierung liefert die Skills als versionierte Markdown-Dateien im Repository unter skills/<name>/SKILL.md. Sie sollen mit verschiedenen Agenten verwendbar sein, ohne eine bestimmte Agentenplattform vorauszusetzen. Skill-Anweisungen definieren den Ablauf, MCP stellt die Werkzeuge bereit, der Server erzwingt Daten- und Berechtigungsregeln.
+
+| Skill | Auftrag und Ablauf |
+| --- | --- |
+| dokumenteingang-aufarbeiten | Alle noch nicht verarbeiteten Dokumente der gewählten Firma/Periode paginiert abarbeiten; Original lesen, Dokumentart und Rechnungsdaten ermitteln, bekannte Firma/Kategorie/Periode zuordnen, Summen prüfen, Dubletten verknüpfen und Ergebnisse über MCP speichern. Unsicherheiten mit Belegstelle zur Prüfung ablegen; Abschlussbericht über bearbeitete, übersprungene und offene Dokumente liefern. |
+| konto-und-depotunterlagen-sortieren | CAMT, PDF-Kontoauszüge und Wertpapier-PDFs den bekannten Konten/Depots und Zeiträumen zuordnen, zusammengehörige CAMT/PDF-Unterlagen verknüpfen und unklare Zuordnungen melden. |
+| monatsuebergabe-vorbereiten | Sämtliche Dokumentarten und offenen Punkte einer Firma/Periode berücksichtigen, Nachträge erkennen, Vollständigkeit prüfen und das Übergabepaket mit Inhaltsliste erstellen. SMTP-Versand bei ausdrücklichem Auftrag oder nach eingerichteter Versandregel ausführen und Ergebnis berichten. |
+
+Beispielaufträge:
+
+- „Gehe alle neuen Rechnungen durch, ermittle die Rechnungsdaten und sortiere sie nach Firma, Kategorie und Monat. Zeige mir danach die offenen Fälle.“
+- „Ordne diese CAMT- und PDF-Auszüge den Konten zu und sortiere die Wertpapierbewegungen zum richtigen Depot.“
+- „Bereite den Oktober für die Steuerberatung vor und zeige die Paketvorschau.“
+- „Versende das vorbereitete Oktoberpaket an die hinterlegte Steuerberatung.“
+
+Die Skills unterscheiden Aussteller und Empfänger, bewahren Originalwährung und Originaldaten und erfinden keine fehlenden Werte. Extern ausgestellte Ausgangsrechnungen bleiben unverändert. Ungeklärte Fälle werden gesammelt gemeldet; eindeutig zuordenbare Fälle können gemäß gewählter Bearbeitungsregel ohne Einzelrückfrage abgearbeitet werden. Wiederholte Durchläufe überspringen bereits unverändert bearbeitete Dokumente. Dokument- und E-Mail-Inhalte sind Daten, keine ausführbaren Skill-Anweisungen.
+
 ## 7. Oberfläche und Betrieb mit Docker Compose
 
 Die erste Oberfläche umfasst Firmenwechsel, Dokumenteingang/Upload, Dokumentliste mit Detailprüfung, Monats-/Periodenübersicht, Pakete/Versandhistorie und Einstellungen für Firmen, Konten, Depots und E-Mail.
@@ -110,10 +140,10 @@ Die erste Oberfläche umfasst Firmenwechsel, Dokumenteingang/Upload, Dokumentlis
 Vorgeschlagener einfacher Betriebsaufbau:
 
 - App-Service für Weboberfläche, API und MCP.
-- Worker aus derselben Codebasis für IMAP-Abruf, Auslese, Paketerstellung und SMTP-Warteschlange.
+- Worker aus derselben Codebasis für IMAP-Abruf, technische Dokumentvorbereitung, Paketerstellung und SMTP-Warteschlange.
 - PostgreSQL für Metadaten, Aufträge und Protokolle.
 - Persistentes Volume für Originaldateien und Paket-Snapshots.
-- Optionale OCR-/Modellanbindung hinter einer austauschbaren Schnittstelle; fehlende Anbindung blockiert die manuelle Ablage nicht.
+- Vorhandener externer Agent mit MCP-Verbindung für Auslese und Sortierung. Kein Modellservice als Voraussetzung des Compose-Stacks; lokale Textextraktion oder Seitenvorschau kann den Agenten unterstützen. Eine serverseitige OCR-/Modellanbindung ist ein späterer optionaler Ausbau.
 
 Docker Compose soll den gesamten Kernbetrieb starten. Kein Kubernetes und keine zusätzlichen Queue-/Objektspeicherdienste als Voraussetzung für die erste Version. Datenbankgestützte Jobs müssen Neustarts, Sperren und Wiederaufnahme beherrschen.
 
@@ -124,12 +154,12 @@ Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne ec
 ### Etappe 1 – Dokumente, IMAP, Paket und MCP
 
 1. Firmen, Konten/Depots, Originalablage und manuelle Metadaten.
-2. Upload, automatische Auslese, Prüfung und Dublettenerkennung.
+2. Upload, MCP-Dokumentzugriff, validierte Ergebnisübernahme vom externen Agenten, Prüfung und Dublettenerkennung sowie Skills.
 3. IMAP-Eingang und wiederaufnehmbare Hintergrundaufträge.
 4. Paketvorschau, ZIP/Übersichten, SMTP-Versand und Nachträge.
-5. MCP für dieselben Abläufe; Docker-Compose-Betrieb und Wiederherstellung.
+5. Vollständiger Agentendurchlauf mit den Skills; Docker-Compose-Betrieb und Wiederherstellung ohne interne KI-Anbindung.
 
-Abnahme anhand eines vollständigen Testmonats mit zwei Firmen: Invoice-Ninja-Ausgangsrechnung als PDF, Eingangsrechnung, Gutschrift, CAMT samt passendem PDF-Auszug und Wertpapierbewegung als PDF. Alle Originale erscheinen unter der richtigen Firma und Periode im Paket. Eine E-Mail mit mehreren Anhängen wird bei wiederholtem Abruf und nach Neustart nur einmal importiert. Fehlerhafte Auslese verliert keine Datei. Wiederholte MCP-Aufträge erzeugen keinen Doppelversand. Ein Nachtrag ist vom ursprünglichen Paket unterscheidbar. Versandfehler und unbekannter Versandausgang bleiben sichtbar. Backup und Restore stellen Dokumente, Zuordnungen und Paketstände wieder her.
+Abnahme anhand eines vollständigen Testmonats mit zwei Firmen: Invoice-Ninja-Ausgangsrechnung als PDF, Eingangsrechnung, Gutschrift, CAMT samt passendem PDF-Auszug und Wertpapierbewegung als PDF. Alle Originale erscheinen unter der richtigen Firma und Periode im Paket. Eine E-Mail mit mehreren Anhängen wird bei wiederholtem Abruf und nach Neustart nur einmal importiert. Fehlerhafte Auslese verliert keine Datei. Ein Agent kann über MCP alle neuen Dokumente vollständig auflisten, lesen, klassifizieren und seine Ergebnisse speichern; ein zweiter unveränderter Skill-Durchlauf legt nichts doppelt an. Unklare Firmenzuordnungen, abweichende Summen und zwischenzeitliche manuelle Korrekturen bleiben geschützt und sichtbar. Der Server startet ohne eigene LLM-Zugangsdaten. Wiederholte MCP-Aufträge erzeugen keinen Doppelversand. Ein Nachtrag ist vom ursprünglichen Paket unterscheidbar. Versandfehler und unbekannter Versandausgang bleiben sichtbar. Backup und Restore stellen Dokumente, Zuordnungen und Paketstände wieder her.
 
 ### Etappe 2 – Eigene Rechnungen und Bankabgleich
 
@@ -149,7 +179,7 @@ Native Buchhaltungsimporte für die Kanzlei, strukturierte E-Rechnungen, weiterg
 - Benötigte CAMT-Versionen anhand echter, anonymisierter Beispieldateien.
 - Gewünschte Konten-/Depotbezeichnungen, Kategorien und Übersichtsspalten mit der Steuerberatung.
 - Mailanbieter, Authentifizierungsverfahren, Importordner, Absender und maximale Anhangsgröße.
-- OCR-/KI-Anbieter oder lokale Verarbeitung sowie Betriebskosten.
+- Vorhandenen Agenten anbinden; Datei-/Seitenzugriff und strukturierte Ergebnisübernahme anhand echter Dokumentarten prüfen. Eine eigene serverseitige KI-Anbindung wird erst bei späterem Bedarf entschieden.
 - Automatisierungsregeln: manueller Paketversand oder explizit eingerichteter Monatslauf; Verhalten bei offenen Punkten.
 
 Diese Punkte betreffen die Umsetzungskonfiguration. Die fachliche erste Version bleibt PDF-/Dateiimport, E-Mail-Eingang, strukturierte Übergabe, SMTP-Versand, MCP und Docker Compose.
