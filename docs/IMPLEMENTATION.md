@@ -8,7 +8,7 @@ Etappe 1 aus `PLAN.md` vollständig implementieren; spätere Etappen nicht vorzi
 
 ## Meilensteine
 
-- [ ] M1: Reproduzierbarer Stack, Modelle/Migrationen, Auth, gemeinsame Services.
+- [x] M1: Python-Stack gepinnt/gelockt, Modelle/Migrationen, Auth und gemeinsame Services. Compose/Frontend folgen in M2/M5.
 - [ ] M2: Sichere Originalablage, Revisionen, CAMT, REST und nutzerorientierte Oberfläche.
 - [ ] M3: IMAP, persistente Jobs, unveränderliche Pakete/Nachträge, SMTP.
 - [ ] M4: Authentifiziertes MCP, echter Client-Durchlauf, drei ausführbare Skills.
@@ -22,4 +22,13 @@ Etappe 1 aus `PLAN.md` vollständig implementieren; spätere Etappen nicht vorzi
 
 ## Abnahme
 
-Hier werden tatsächliche Kommandos und Ergebnisse ergänzt. Entwicklung, lokale synthetische Abnahme und produktive Live-Einrichtung bleiben getrennt. Live-Orca, echte IMAP-/SMTP-Zugänge und repräsentative Kundendokumente sind spätere Einrichtungsschritte.
+### 2026-11-18 – M1 / erster Backend-Durchstich
+
+- `uv sync`: 52 Pakete unter Python 3.15.2 installiert, reproduzierbares Lockfile.
+- `uv run python backend/manage.py migrate --noinput`: eigene und Framework-Migrationen erfolgreich (lokale SQLite-Entwicklungsdatenbank).
+- `uv run python backend/manage.py check`: keine Fehler.
+- `uv run pytest -q`: **10 Tests erfolgreich** (Originalbytes, echte Ordner, Firmenisolation/Downloads, sichere Dateinamen, Dubletten, Summen/Decimal, Versionskonflikte, unterbrochene Ablage, CAMT/XML-Sicherheit, binärer Upload, PDF-/Bildansicht, Login-CSRF).
+- Import von `config.asgi` einschließlich offiziellem MCP-v2-Server erfolgreich. Ein echter Protokoll-Client-Test steht noch aus.
+- Docker-CLI 29.10.0 testweise außerhalb des Repositorys heruntergeladen. Rootless-Daemon scheitert bisher am fehlenden privilegierten `newuidmap`; Compose-Laufzeittest weiterhin offen.
+
+Weitere tatsächliche Kommandos und Ergebnisse werden ergänzt. Entwicklung, lokale synthetische Abnahme und produktive Live-Einrichtung bleiben getrennt. Live-Orca, echte IMAP-/SMTP-Zugänge und repräsentative Kundendokumente sind spätere Einrichtungsschritte.
