@@ -15,11 +15,11 @@ from iso4217 import Currency
 from openpyxl import load_workbook
 from pydantic import ValidationError
 
-from accounting import jobs, mail, packages, services, storage
+from accounting import jobs, mail, packages, services, storage, transfers
 from accounting.auth import DomainError
 from accounting.camt import SUPPORTED_NAMESPACES, parse_camt
 from accounting.demo import sample_camt, sample_pdf, seed_month
-from accounting.models import Account, Dispatch, Document, FileOperation, Job, Mailbox
+from accounting.models import Account, Dispatch, Document, FileOperation, ImportSource, Job, Mailbox
 from accounting.schemas import Metadata, validation_issues
 
 pytestmark = pytest.mark.django_db
@@ -101,6 +101,47 @@ def test_account_category_period_and_missing_fields(actor, companies):
     saved = services.save_result(actor, base)
     assert "Konto/Depot ungeklärt" in saved["issues"]
     assert "Auszugszeitraum unvollständig" in saved["issues"]
+
+
+def test_long_unicode_filename_remains_byte_safe_and_keeps_extension(actor, companies):
+    name = "資" * 80 + ".pdf"  # Legal Linux filename; UUID prefix must still fit NAME_MAX.
+    original = sample_pdf(["unicode filename"])
+    doc = services.ingest(actor, name, original, companies[0].id)["document"]
+    assert doc["filing_status"] == "done" and doc["original_name"] == name
+    saved = services.save_result(
+        actor,
+        {
+            "document_id": doc["id"],
+            "base_version": 1,
+            "company_id": companies[0].id,
+            "kind": "receipt",
+            "period": "2026-10",
+            "metadata": {},
+            "approve": True,
+        },
+    )
+    filename = storage.path(saved["filed_path"])
+    assert len(filename.name.encode("utf-8")) <= 255 and filename.suffix == ".pdf"
+    assert filename.read_bytes() == original
+    for invalid in ["", " ", "x" * 256, "bad\x00.pdf", "bad\ud800.pdf"]:
+        with pytest.raises(DomainError):
+            services.ingest(actor, invalid, original, companies[0].id)
+        with pytest.raises(DomainError):
+            transfers.prepare_upload(
+                actor, invalid, len(original), storage.checksum(original), companies[0].id
+            )
+    assert Document.objects.count() == 1
+    message = EmailMessage()
+    message["From"] = "supplier@example.test"
+    message["To"] = "office@example.test"
+    message["Subject"] = "malformed\x00header"
+    message.set_content("preserve malformed attachment")
+    message.add_attachment(original, maintype="application", subtype="pdf", filename="bad\x00.pdf")
+    mailbox = Mailbox.objects.create(company=companies[0])
+    assert mail.import_message(actor, mailbox, "100", 1, message.as_bytes()) == 1
+    source = ImportSource.objects.get()
+    assert source.error and "\\u0000" in source.provenance["filename"]
+    assert storage.path(source.provenance["preserved_path"]).read_bytes() == original
 
 
 def test_imap_tls_verifies_certificate_and_hostname(actor, companies):

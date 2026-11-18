@@ -11,6 +11,7 @@ from .models import ProcessingClaim, UploadTicket
 
 
 def prepare_upload(actor, filename, size, sha256, company_id=None):
+    filename = services.validate_original_filename(filename)
     if company_id:
         actor.require(company_id, "process")
     else:
@@ -20,7 +21,7 @@ def prepare_upload(actor, filename, size, sha256, company_id=None):
     ticket = UploadTicket.objects.create(
         actor_id=actor.user_id,
         company_id=company_id,
-        filename=filename[:255],
+        filename=filename,
         expected_size=size,
         expected_sha256=sha256,
     )

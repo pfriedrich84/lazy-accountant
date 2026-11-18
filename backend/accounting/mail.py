@@ -124,6 +124,13 @@ def mail_config(actor, company_id, payload=None):
     return result
 
 
+def safe_mail_text(value):
+    # PostgreSQL JSONB cannot contain NUL or unpaired surrogate characters.
+    # Keep malformed header values visibly escaped rather than blocking the
+    # entire mailbox; the unchanged attachment and source message hash remain.
+    return str(value).replace("\x00", r"\u0000").encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
 def source_key(*parts):
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
 
@@ -161,17 +168,17 @@ def import_message(actor, mailbox, uidvalidity, uid, raw):
         data = part.get_payload(decode=True) or b""
         stable = source_key(mailbox.id, raw_hash, index, storage.checksum(data))
         provenance = {
-            "sender": str(message.get("from", "")),
-            "recipients": recipients,
-            "subject": str(message.get("subject", "")),
-            "date": str(message.get("date", "")),
-            "message_id": str(message.get("message-id", "")),
+            "sender": safe_mail_text(message.get("from", "")),
+            "recipients": [safe_mail_text(r) for r in recipients],
+            "subject": safe_mail_text(message.get("subject", "")),
+            "date": safe_mail_text(message.get("date", "")),
+            "message_id": safe_mail_text(message.get("message-id", "")),
             "mailbox_id": mailbox.id,
             "folder": mailbox.imap_folder,
             "uidvalidity": str(uidvalidity),
             "uid": str(uid),
             "part": index,
-            "filename": filename or "anhang",
+            "filename": safe_mail_text(filename or "anhang"),
             "raw_message_sha256": raw_hash,
         }
         with transaction.atomic():

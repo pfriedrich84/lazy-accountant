@@ -108,6 +108,7 @@ export default function Packages() {
     if (job.data?.status === "done" && job.data.result.id) {
       setSelectedId(String(job.data.result.id));
       void cache.invalidateQueries({ queryKey: ["packages"] });
+      void cache.invalidateQueries({ queryKey: ["jobs"] });
     }
   }, [job.data, cache]);
   const send = useMutation({

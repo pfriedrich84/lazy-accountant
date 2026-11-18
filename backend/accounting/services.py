@@ -30,6 +30,16 @@ from .schemas import DocumentResult, validation_issues
 Image.MAX_IMAGE_PIXELS = 25_000_000
 
 
+def validate_original_filename(name):
+    if not isinstance(name, str) or not name.strip() or len(name) > 255 or "\x00" in name:
+        raise DomainError("Originaldateiname muss 1 bis 255 Zeichen ohne Nullbyte enthalten.")
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError as e:
+        raise DomainError("Originaldateiname enthält ungültiges Unicode.") from e
+    return name
+
+
 def valid_period(value):
     if (
         not isinstance(value, str)
@@ -259,6 +269,7 @@ def detect_media(data, name):
 
 
 def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=None):
+    name = validate_original_filename(name)
     if not data or len(data) > settings.MAX_FILE_BYTES:
         raise DomainError("Datei leer oder Größenlimit überschritten.", 413)
     if company_id:
@@ -296,7 +307,7 @@ def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=
                 id=uuid.uuid4(),
                 company_id=company_id,
                 inbox_owner_id=actor.user_id,
-                original_name=str(name)[:255],
+                original_name=name,
                 sha256=digest,
                 size=len(data),
                 media_type=media,

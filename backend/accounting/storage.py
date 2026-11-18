@@ -42,8 +42,18 @@ def checksum(data):
 
 def safe_filename(name):
     name = str(name).replace("\\", "/").split("/")[-1]
-    name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE).strip(" .")[:160]
-    return name or "dokument"
+    name = re.sub(r"[^\w. -]", "_", name, flags=re.UNICODE).strip(" .")
+    stem, suffix = os.path.splitext(name)
+    if len(suffix.encode("utf-8")) > 16:
+        stem, suffix = name, ""
+    # NAME_MAX is a byte limit, not a Unicode-character limit. Leave room for
+    # the UUID prefix and preserve ordinary extensions even after truncation.
+    stem = (
+        stem.encode("utf-8")[: 160 - len(suffix.encode("utf-8"))]
+        .decode("utf-8", errors="ignore")
+        .rstrip(" .")
+    )
+    return (stem or "dokument") + suffix
 
 
 def atomic_write(relative, data, expected_hash=None):
