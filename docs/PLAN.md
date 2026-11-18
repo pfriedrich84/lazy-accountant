@@ -179,11 +179,13 @@ Lieferumfang der Implementierung: Dockerfile, compose.yaml, .env.example ohne ec
 
 ### 7.1 Festgelegte Frameworks und Wiederverwendung
 
+Versionsrichtlinie: Verwende bei Implementierungsstart für Frameworks, Bibliotheken, Laufzeitumgebungen und Container-Basisimages jeweils die neuesten stabilen, unterstützten und miteinander kompatiblen Releases einschließlich der neuesten stabilen Major-/Minor-Version. Prüfe offizielle Release- und Kompatibilitätsangaben, dokumentiere den Prüfzeitpunkt und pinne die konkret gewählten Versionen in Lockfiles und Containerdefinitionen. Alpha-, Beta-, RC-, Nightly- und Development-Releases sind ausgeschlossen. Wenn die jeweils neueste Stable-Version nachweislich inkompatibel ist, dokumentiere den konkreten Konflikt und verwende die neueste kompatible Stable-Version. Allein ein LTS-Label ist kein Grund, eine ältere Release-Reihe zu bevorzugen.
+
 Die Anwendung nutzt etablierte Framework-Funktionen für Infrastruktur und Standardabläufe; individuell implementiert werden die fachlichen Regeln der Dokumentzuordnung und Übergabe.
 
 | Bereich | Festlegung |
 | --- | --- |
-| Python-Backend | Django 5.2 LTS mit aktuellem kompatiblem Patchstand und Django REST Framework |
+| Python-Backend | Django und Django REST Framework in den neuesten stabilen, miteinander kompatiblen Versionen |
 | Datenbankzugriff | Django ORM, Django-Migrationen und PostgreSQL; keine zweite ORM-/Migrationsschicht |
 | Benutzer und Administration | Django Auth, Sessions, Berechtigungen und Django Admin; Admin ergänzt die eigentliche Benutzeroberfläche |
 | Weboberfläche | React und TypeScript; React Router im Framework Mode mit SPA-Konfiguration und Vite-Build |
@@ -242,7 +244,7 @@ Der Coding-Agent kann mit Etappe 1 beginnen. Die fachlichen Anforderungen, Ordne
 
 ### Technische Umsetzung ohne weitere Grundsatzentscheidung
 
-- Festgelegter Stack: Django 5.2 LTS mit Django REST Framework, Django ORM/Migrationen/Auth/Admin, PostgreSQL, React/TypeScript mit React Router (Framework Mode, SPA über Vite), Material UI und TanStack Query. Hintergrundjobs verwenden Django-Q2 mit ORM-Broker. MCP nutzt das offizielle Python-SDK. Kompatible stabile Patch-/Paketversionen werden bei Implementierungsstart geprüft, fest gepinnt und mit Lockfiles dokumentiert.
+- Festgelegter Stack: Django (neueste kompatible Stable-Version) mit Django REST Framework, Django ORM/Migrationen/Auth/Admin, PostgreSQL, React/TypeScript mit React Router (Framework Mode, SPA über Vite), Material UI und TanStack Query. Hintergrundjobs verwenden Django-Q2 mit ORM-Broker. MCP nutzt das offizielle Python-SDK. Kompatible stabile Patch-/Paketversionen werden bei Implementierungsstart geprüft, fest gepinnt und mit Lockfiles dokumentiert.
 - Ein Benutzerkonto mit mehreren getrennten Firmen genügt zunächst. Oberfläche und MCP erhalten eine einfache dokumentierte Authentifizierung und dieselben fachlichen Berechtigungen.
 - Originaldateien liegen in einem konfigurierbaren Hostordner, der über einen Docker-Compose-Bind-Mount eingebunden wird. Darunter gilt die festgelegte Firmen-/Jahres-/Monatsstruktur. Paket-Snapshots und Eingangsablage haben eigene technische Bereiche.
 - Vorschlag für die initiale Monatszuordnung: Rechnungen nach Belegdatum, Konto-/Depotunterlagen nach Auszugsmonat bzw. Ende des Auszugszeitraums. Unsicherheit, mehrmonatige Unterlagen und manuelle Korrekturen bleiben sichtbar und übersteuerbar; das Datum eines Imports bestimmt nicht automatisch den Belegmonat.
