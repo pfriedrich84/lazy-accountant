@@ -91,7 +91,7 @@ def reconcile(document_id=None):
         try:
             with transaction.atomic():
                 op = FileOperation.objects.get(id=op_id)
-                doc = Document.objects.select_for_update().select_related("company").get(id=op.document_id)
+                doc = Document.objects.select_for_update(of=("self",)).select_related("company").get(id=op.document_id)
                 if op.status != "pending":
                     continue
                 if op.version != doc.version:

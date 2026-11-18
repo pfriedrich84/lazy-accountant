@@ -13,7 +13,7 @@ class Company(models.Model):
     legal_name = models.CharField(max_length=200, blank=True)
     tax_id = models.CharField(max_length=80, blank=True)
     address = models.TextField(blank=True)
-    recipients = models.JSONField(default=list)
+    recipients = models.JSONField(default=list, blank=True)
     allow_open_issues = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -70,7 +70,7 @@ class Mailbox(models.Model):
     imap_folder = models.CharField(max_length=200, default="INBOX")
     import_since = models.DateField(null=True, blank=True)
     enabled = models.BooleanField(default=False)
-    aliases = models.JSONField(default=list)
+    aliases = models.JSONField(default=list, blank=True)
     uidvalidity = models.CharField(max_length=80, blank=True)
     last_uid = models.PositiveBigIntegerField(default=0)
     last_scan_at = models.DateTimeField(null=True, blank=True)

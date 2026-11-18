@@ -1,7 +1,9 @@
 """Django-Q2 handles transport; these rows guard business side effects and resumption."""
+import json
 import logging
 from datetime import timedelta
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.utils import timezone
 from django_q.models import Schedule
@@ -60,7 +62,7 @@ def run_job(job_id):
             result = send_dispatch(job)
         else:
             raise DomainError("Dieser Auftrag wird durch den externen Agenten abgeschlossen.")
-        job.status, job.result, job.error = "done", result, ""
+        job.status, job.result, job.error = "done", json.loads(json.dumps(result, cls=DjangoJSONEncoder)), ""
     except Exception as e:
         # Do not log mail credentials or document contents.
         job.status = "failed"
