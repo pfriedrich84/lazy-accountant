@@ -162,19 +162,23 @@ def received_parts(host, port, recipient):
         return len(ids[0].split()), b"".join(parts[k] for k in sorted(parts))
 
 
+async def authenticate_admin(web, config):
+    csrf = (await web.get("/api/auth/csrf/")).json()["csrfToken"]
+    response = await web.post(
+        "/api/auth/login/",
+        json={"username": config.get("ADMIN_USERNAME", "admin"), "password": config["ADMIN_PASSWORD"]},
+        headers={"X-CSRFToken": csrf},
+    )
+    response.raise_for_status()
+    web.headers["X-CSRFToken"] = response.json()["csrfToken"]
+
+
 async def exercise(args, config):
     run_id = uuid.uuid4().hex[:12]
     company_name = "Synthetic MCP " + run_id
     fixtures = sample_files(company_name, args.period)
     async with httpx2.AsyncClient(base_url=args.url, timeout=60) as web:
-        csrf = (await web.get("/api/auth/csrf/")).json()["csrfToken"]
-        response = await web.post(
-            "/api/auth/login/",
-            json={"username": config.get("ADMIN_USERNAME", "admin"), "password": config["ADMIN_PASSWORD"]},
-            headers={"X-CSRFToken": csrf},
-        )
-        response.raise_for_status()
-        web.headers["X-CSRFToken"] = response.json()["csrfToken"]
+        await authenticate_admin(web, config)
 
         async def rest(path, data):
             r = await web.post("/api/" + path, json=data)
@@ -356,6 +360,10 @@ async def exercise(args, config):
                     assert repeat["id"] == job["id"]
                     report = {
                         "company_id": cid,
+                        "period": args.period,
+                        "idempotency_prefix": run_id,
+                        "recipient": recipient,
+                        "package_job_id": job["id"],
                         "job_id": run["id"],
                         "package_id": package["id"],
                         "package_sha256": package["sha256"],
@@ -397,15 +405,122 @@ async def exercise(args, config):
                     )
                     return report
         finally:
-            await web.delete(f"/api/tokens/{token['id']}/")
+            (await web.delete(f"/api/tokens/{token['id']}/")).raise_for_status()
+
+
+async def verify_existing(args, config):
+    previous = json.loads(Path(args.verify_report).read_text())
+    cid, prefix = previous["company_id"], previous["idempotency_prefix"]
+    async with httpx2.AsyncClient(base_url=args.url, timeout=60) as web:
+        await authenticate_admin(web, config)
+        response = await web.post(
+            "/api/tokens/",
+            json={
+                "name": "Synthetic restore verification",
+                "company_ids": [cid],
+                "scopes": ["read", "process", "send", "inbox"],
+            },
+        )
+        response.raise_for_status()
+        token = response.json()
+        try:
+            async with httpx2.AsyncClient(
+                headers={"Authorization": "Bearer " + token["token"]}, timeout=60
+            ) as http:
+                async with Client(streamable_http_client(args.url + "/mcp/", http_client=http)) as client:
+                    documents = await tool(client, "list_documents", {"company_id": cid, "status": None})
+                    assert documents["total"] == previous["documents"]
+                    assert (await tool(client, "list_documents", {"company_id": cid, "status": "open"}))[
+                        "total"
+                    ] == 0
+                    for doc in documents["results"]:
+                        access = await tool(client, "get_file_access", {"document_id": doc["id"]})
+                        original = await http.get(args.url + access["original_url"])
+                        original.raise_for_status()
+                        assert digest(original.content) == doc["sha256"]
+                    package = await tool(client, "get_package", {"package_id": previous["package_id"]})
+                    downloaded = await http.get(args.url + package["download_url"])
+                    downloaded.raise_for_status()
+                    assert digest(downloaded.content) == previous["package_sha256"] == package["sha256"]
+                    job = await tool(
+                        client,
+                        "create_package",
+                        {
+                            "company_id": cid,
+                            "periods": [previous["period"]],
+                            "idempotency_key": prefix + ":package",
+                        },
+                    )
+                    assert job["id"] == previous["package_job_id"] and job["status"] == "done"
+                    report = {
+                        "company_id": cid,
+                        "previous_package_sha256_verified": True,
+                        "originals_verified": documents["total"],
+                        "package_job_reused": True,
+                    }
+                    if args.mail:
+                        before = await web.get(f"/api/settings/{cid}/mail/")
+                        before.raise_for_status()
+                        before = before.json()
+                        assert before["last_uid"] > 0 and before["uidvalidity"]
+                        imported = await tool(
+                            client,
+                            "start_imap_import",
+                            {
+                                "company_id": cid,
+                                "idempotency_key": prefix + ":restore-check:" + uuid.uuid4().hex[:8],
+                            },
+                        )
+                        imported = await wait_job(client, imported["id"])
+                        assert imported["result"]["messages"] == imported["result"]["attachments"] == 0
+                        assert imported["result"]["last_uid"] == before["last_uid"]
+                        dispatch = await tool(
+                            client, "get_dispatch", {"dispatch_id": previous["dispatch_id"]}
+                        )
+                        assert dispatch["package_id"] == package["id"] and dispatch["status"] == "accepted"
+                        repeated = await tool(
+                            client,
+                            "send_package",
+                            {"package_id": package["id"], "idempotency_key": prefix + ":send"},
+                        )
+                        assert repeated["id"] == dispatch["id"]
+                        count, reassembled = await asyncio.to_thread(
+                            received_parts,
+                            config.get("MAIL_TEST_CONNECT_HOST", "127.0.0.1"),
+                            int(config.get("MAIL_TEST_IMAP_PORT", "3143")),
+                            previous["recipient"],
+                        )
+                        assert count == previous["mail_parts"] and digest(reassembled) == package["sha256"]
+                        assert (await tool(client, "list_documents", {"company_id": cid, "status": None}))[
+                            "total"
+                        ] == previous["documents"]
+                        report.update(
+                            {
+                                "restored_imap_checkpoint_verified": True,
+                                "no_duplicate_import": True,
+                                "dispatch_reused_without_resend": True,
+                                "mail_count_unchanged": count,
+                            }
+                        )
+                    return report
+        finally:
+            (await web.delete(f"/api/tokens/{token['id']}/")).raise_for_status()
 
 
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8000")
-    parser.add_argument("--exercise", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--exercise", action="store_true")
+    modes.add_argument(
+        "--verify-report",
+        type=Path,
+        help="Früheren synthetischen Test nach Neustart/Restore ohne neue Dokumente oder Neuversand überprüfen",
+    )
     parser.add_argument(
-        "--mail", action="store_true", help="GreenMail-Testsystem verwenden (nur mit --exercise)"
+        "--mail",
+        action="store_true",
+        help="Kontrolliertes GreenMail-Testsystem für Exercise/Restoreprüfung verwenden",
     )
     parser.add_argument("--period", default="2026-10")
     parser.add_argument("--report", type=Path)
@@ -414,6 +529,8 @@ async def main():
     config = env()
     if args.exercise:
         result = await exercise(args, config)
+    elif args.verify_report:
+        result = await verify_existing(args, config)
     else:
         token = config.get("LA_MCP_TOKEN")
         if not token:

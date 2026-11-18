@@ -9,6 +9,8 @@ import {
   Box,
   Button,
   Chip,
+  Checkbox,
+  FormControlLabel,
   MenuItem,
   Paper,
   Stack,
@@ -118,7 +120,13 @@ function Editor({ doc }: { doc: Document }) {
       type={type}
       value={String(metadata[key] ?? "")}
       onChange={(e) =>
-        setMetadata((m) => ({ ...m, [key]: e.target.value || null }))
+        setMetadata((m) => ({
+          ...m,
+          [key]: e.target.value || null,
+          ...(key === "period_start" || key === "period_end"
+            ? { period_assignment_confirmed: false }
+            : {}),
+        }))
       }
       slotProps={type === "date" ? { inputLabel: { shrink: true } } : undefined}
       fullWidth
@@ -338,7 +346,13 @@ function Editor({ doc }: { doc: Document }) {
                   label="Übergabemonat"
                   type="month"
                   value={period}
-                  onChange={(e) => setPeriod(e.target.value)}
+                  onChange={(e) => {
+                    setPeriod(e.target.value);
+                    setMetadata((m) => ({
+                      ...m,
+                      period_assignment_confirmed: false,
+                    }));
+                  }}
                   slotProps={{ inputLabel: { shrink: true } }}
                   fullWidth
                 />
@@ -401,6 +415,39 @@ function Editor({ doc }: { doc: Document }) {
                     {field("period_start", "Auszugsbeginn", "date")}
                     {field("period_end", "Auszugsende", "date")}
                   </Stack>
+                  {metadata.period_start &&
+                    metadata.period_end &&
+                    metadata.period_start.slice(0, 7) !==
+                      metadata.period_end.slice(0, 7) && (
+                      <Alert severity="warning">
+                        <Stack sx={{ gap: 1 }}>
+                          <Typography>
+                            Mehrmonatiger Originalzeitraum bleibt unverändert.
+                            Die Ablage in einem einzelnen Übergabemonat muss
+                            bewusst bestätigt werden.
+                          </Typography>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={!!metadata.period_assignment_confirmed}
+                                onChange={(e) =>
+                                  setMetadata((m) => ({
+                                    ...m,
+                                    period_assignment_confirmed:
+                                      e.target.checked,
+                                  }))
+                                }
+                              />
+                            }
+                            label="Zuordnung zum gewählten Übergabemonat ausdrücklich bestätigt"
+                          />
+                          {field(
+                            "period_assignment_reason",
+                            "Begründung der mehrmonatigen Zuordnung",
+                          )}
+                        </Stack>
+                      </Alert>
+                    )}
                   {field("subtype", "Unterart")}
                 </>
               )}
@@ -480,11 +527,22 @@ function Editor({ doc }: { doc: Document }) {
                       onChange={(e) => setEvidence(e.target.value)}
                     />
                     <TextField
-                      label="Zusammengehörige Dokument-IDs (eine pro Zeile)"
+                      label="Verweise auf zugehörige Dokument-IDs (eine pro Zeile)"
+                      helperText="Diese Verweise gehören zur Revision dieses Dokuments. Eingehende Verweise werden im jeweiligen Quelldokument geändert."
                       multiline
                       value={related}
                       onChange={(e) => setRelated(e.target.value)}
                     />
+                    {(doc.referenced_by_ids?.length || 0) > 0 && (
+                      <Alert severity="info">
+                        Andere Dokumente verweisen auf dieses Original:{" "}
+                        {doc.referenced_by_ids?.map((id) => (
+                          <Box key={id}>
+                            <Link to={`/documents/${id}`}>{id}</Link>
+                          </Box>
+                        ))}
+                      </Alert>
+                    )}
                     <TextField
                       label="Dublette von (Dokument-ID)"
                       value={duplicateOf}

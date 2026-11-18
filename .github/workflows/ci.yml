@@ -84,6 +84,7 @@ jobs:
           sh scripts/backup.sh var/ci-backup
           sh scripts/restore.sh var/ci-backup --yes-replace
           docker compose exec -T app python backend/manage.py verify_integrity
+          uv run python scripts/mcp_client.py --verify-report var/compose-report.json --mail --report var/compose-restored-replay-report.json
           uv run python scripts/mcp_client.py --exercise --mail --report var/compose-after-restore-report.json
       - name: Diagnostic logs on failure
         if: failure()
@@ -96,5 +97,6 @@ jobs:
             frontend/test-results/
             var/compose-report.json
             var/compose-after-restore-report.json
+            var/compose-restored-replay-report.json
       - if: always()
         run: docker compose --profile test-mail down -v

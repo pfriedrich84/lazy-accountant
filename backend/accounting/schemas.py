@@ -38,6 +38,13 @@ class TaxLine(BaseModel):
             raise ValueError("Ungültiger Dezimalbetrag.")
         return value
 
+    @field_validator("rate")
+    @classmethod
+    def plausible_rate(cls, value):
+        if value is not None and not Decimal("0") <= value <= Decimal("100"):
+            raise ValueError("Steuersatz muss zwischen 0 und 100 liegen; Vorzeichen bleiben an den Beträgen.")
+        return value
+
 
 class Evidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -57,6 +64,8 @@ class Metadata(BaseModel):
     due_date: Date | None = None
     period_start: Date | None = None
     period_end: Date | None = None
+    period_assignment_confirmed: bool = False
+    period_assignment_reason: str | None = Field(default=None, max_length=1000)
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     net: Decimal | None = None
     tax: Decimal | None = None
@@ -128,6 +137,8 @@ def validation_issues(kind, company_id, period, account_id, metadata, parser_err
         ]:
             if getattr(m, field) is None or getattr(m, field) == "":
                 issues.append(f"{title} fehlt")
+    if any(value is not None for value in [m.net, m.tax, m.gross]) and not m.currency:
+        issues.append("Währung fehlt")
     if m.net is not None and m.tax is not None and m.gross is not None:
         exponent = Currency(m.currency).exponent if m.currency else 2
         if exponent is None:
@@ -157,7 +168,10 @@ def validation_issues(kind, company_id, period, account_id, metadata, parser_err
         if not m.period_start or not m.period_end:
             issues.append("Auszugszeitraum unvollständig")
         elif (m.period_start.year, m.period_start.month) != (m.period_end.year, m.period_end.month):
-            issues.append("Mehrmonatiger Auszugszeitraum: Zuordnung prüfen")
+            if not m.period_assignment_confirmed or not (m.period_assignment_reason or "").strip():
+                issues.append(
+                    "Mehrmonatiger Auszugszeitraum: Zuordnung ausdrücklich bestätigen und begründen"
+                )
     if parser_error:
         issues.append(parser_error)
     issues.extend(m.open_points)

@@ -5,7 +5,7 @@ description: Offene Rechnungen und Belege über den Lazy-Accountant-MCP lesen, v
 
 # Dokumenteingang aufarbeiten
 
-Version 1.0. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP `/mcp/` mit Bearer-Token. Die ausführbaren Schritte sind die unten benannten MCP-Aufrufe, kein plattformspezifisches Skript. Nur vorhandene Tools verwenden. Für Bank-/Depotunterlagen zusätzlich `konto-und-depotunterlagen-sortieren` anwenden.
+Version 1.1. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP `/mcp/` mit Bearer-Token. Die ausführbaren Schritte sind die unten benannten MCP-Aufrufe, kein plattformspezifisches Skript. Nur vorhandene Tools verwenden. Für Bank-/Depotunterlagen zusätzlich `konto-und-depotunterlagen-sortieren` anwenden.
 
 ## Sicherheits- und Datenvertrag
 
@@ -28,9 +28,9 @@ Version 1.0. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP 
    - `metadata`: `issuer`, `recipient`, `number`, `date`, optional `service_date`, `due_date`, `currency`, `net`, `tax`, `gross`, `taxes` (Liste aus `rate`, `net`, `tax`), `note`, `open_points`, `evidence`.
    - Belegstellen: `evidence.<feld> = {"page": 1, "excerpt": "Textausschnitt", "uncertain": false, "reason": ""}`. Unsichere Felder mit `uncertain: true` und Grund markieren.
 6. `find_duplicates(document_id)` prüfen. Gleicher Betrag allein ist keine Dublette. Nur eindeutig belegte Dubletten mit `duplicate_of` auf ein Dokument **derselben Firma** verknüpfen, nicht löschen.
-7. `save_document_result(result=…, run_id=…)` aufrufen. `result` muss `document_id`, `base_version`, die vollständige gewünschte Zuordnung und Metadaten enthalten. `related_ids` bewahrt bestehende Verknüpfungen. `approve: true` nur bei vollständigen und plausiblen Ergebnissen ohne offene Punkte; sonst `false`. Der Server prüft Pflichtfelder und Rechenbeziehungen unabhängig von Modellvertrauen.
+7. `save_document_result(result=…, run_id=…)` aufrufen. `result` muss `document_id`, `base_version`, die vollständige gewünschte Zuordnung und Metadaten enthalten. `related_ids` bewahrt die bestehenden ausgehenden Verweise dieses Dokuments; eingehende `referenced_by_ids` sind nur lesbar und werden am jeweiligen Quelldokument mit dessen Ausgangsversion geändert. `approve: true` nur bei vollständigen und plausiblen Ergebnissen ohne offene Punkte; sonst `false`. Der Server prüft Pflichtfelder und Rechenbeziehungen unabhängig von Modellvertrauen.
 8. Bei Versionskonflikt (`409`/Toolfehler) `get_document` neu lesen, neuere manuelle Korrekturen **nicht** durch das alte Ergebnis überschreiben. Abweichung melden oder die tatsächlich neue Ausgangslage erneut prüfen. Kein blinder Retry mit erhöhter Versionsnummer.
-9. Resultat auf `issues`, `status`, `version` und `filed_path` prüfen. Fehlerhafte Auslese verliert kein Original. Bei erneuten Durchläufen keine erneuten Uploads/Pakete erzeugen; bereits unverändert bearbeitete Fälle überspringen.
+9. Resultat auf `issues`, `status`, `version`, `filing_status` und `filed_path` prüfen. `filing_status=pending`/`filing_error` als ausstehende journalisierte Dateiablage melden, nicht als erfolgreich abgelegt behaupten und nicht durch erneutes blindes Metadatenschreiben beheben. Fehlerhafte Auslese verliert kein Original. Bei erneuten Durchläufen keine erneuten Uploads/Pakete erzeugen; bereits unverändert bearbeitete Fälle überspringen.
 
 ## Beispiel-Ergebnis
 

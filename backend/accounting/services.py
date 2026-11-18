@@ -167,6 +167,7 @@ def document_data(d, detailed=False):
         "version": d.version,
         "filed_path": d.filed_path,
         "duplicate_of": str(d.duplicate_of_id) if d.duplicate_of_id else None,
+        "related_ids": [str(x.id) for x in d.related.all()],
         "filing_status": "pending" if pending else "done",
         "filing_error": filing_error,
         "desired_path": desired,
@@ -178,7 +179,10 @@ def document_data(d, detailed=False):
             {
                 "parser_result": d.parser_result,
                 "parser_error": d.parser_error,
-                "related_ids": [str(x) for x in d.related.values_list("id", flat=True)],
+                "referenced_by_ids": [
+                    str(x)
+                    for x in d.referenced_by.filter(company_id=d.company_id).values_list("id", flat=True)
+                ],
                 "sources": list(d.sources.values("id", "provenance", "error", "created_at")),
                 "revisions": list(
                     d.revisions.order_by("-version").values(
@@ -233,7 +237,7 @@ def list_documents(
         except ValueError:
             raise DomainError("Ungültiger Cursor.") from None
     limit = max(1, min(int(limit), 100))
-    rows = list(qs.select_related("company", "account", "category")[: limit + 1])
+    rows = list(qs.select_related("company", "account", "category").prefetch_related("related")[: limit + 1])
     return {
         "results": [document_data(d) for d in rows[:limit]],
         "total": total,
@@ -353,7 +357,15 @@ def save_result(actor, payload, source="manual"):
         raise DomainError("Ergebnis entspricht nicht dem Schema.", details=json.loads(e.json())) from e
     if result.period:
         valid_period(result.period)
+    initial = get_document(actor, result.document_id, "process")
     with transaction.atomic():
+        # Same lock order as ingestion/package creation. Serialize reference and
+        # company changes, including personal-inbox documents, before row writes.
+        from django.contrib.auth import get_user_model
+
+        get_user_model().objects.select_for_update().get(id=actor.user_id)
+        company_ids = {c for c in [initial.company_id, result.company_id] if c}
+        list(Company.objects.filter(id__in=company_ids).order_by("id").select_for_update())
         doc = get_document(actor, result.document_id, "process", lock=True)
         if doc.version != result.base_version:
             raise DomainError(
@@ -365,6 +377,13 @@ def save_result(actor, payload, source="manual"):
             actor.require(result.company_id, "process")
         else:
             actor.require_inbox(doc.inbox_owner_id, "process")
+        if doc.company_id != result.company_id and (
+            doc.referenced_by.exists() or Document.objects.filter(duplicate_of=doc).exists()
+        ):
+            raise DomainError(
+                "Andere Dokumente verweisen auf dieses Original. Verweise/Dubletten in der bisherigen Firma vor dem Firmenwechsel ausdrücklich lösen.",
+                409,
+            )
         for model, identifier, label in [
             (Account, result.account_id, "Konto/Depot"),
             (Category, result.category_id, "Kategorie"),

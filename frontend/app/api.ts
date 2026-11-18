@@ -115,6 +115,8 @@ export interface Metadata {
   due_date?: string | null;
   period_start?: string | null;
   period_end?: string | null;
+  period_assignment_confirmed?: boolean;
+  period_assignment_reason?: string | null;
   currency?: string | null;
   net?: string | null;
   tax?: string | null;
@@ -154,6 +156,7 @@ export interface Document {
   desired_path?: string;
   duplicate_of: string | null;
   related_ids?: string[];
+  referenced_by_ids?: string[];
   created_at: string;
   updated_at: string;
   parser_error?: string;

@@ -24,6 +24,7 @@ COLUMNS = [
     "date",
     "period_start",
     "period_end",
+    "period_assignment_reason",
     "number",
     "issuer",
     "recipient",
@@ -78,6 +79,7 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         .filter(Q(period__in=periods) | Q(period=""))
         .order_by("period", "id")
         .select_related("company", "account", "category")
+        .prefetch_related("related")
     )
     if lock:
         docs = docs.select_for_update(of=("self",))

@@ -24,7 +24,7 @@ Für das private LAN `HTTP_BIND`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MCP_
 
 1. Firma anlegen, sicheren eindeutigen Ordnernamen wählen; Konto/Depot, Kategorien und Steuerberater-Empfänger hinterlegen.
 2. PDFs, JPG/PNG und CAMT-XML im **Dokumenteingang** hochladen. Ungeklärte Firma bleibt im persönlichen Eingang. Der Import rät keinen endgültigen Übergabemonat.
-3. Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben.
+3. Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben. Quartals-/Mehrmonatsauszüge behalten ihren echten Zeitraum; die Zuordnung zu einem Übergabemonat ausdrücklich mit Begründung bestätigen.
 4. Unter **Monatsablage** die echte Hoststruktur prüfen. Alle vier Unterordner bleiben erhalten:
 
    ```text
@@ -91,7 +91,7 @@ Details zu Schemas, Auftrags-/Idempotenz-IDs, Berechtigungen, Lifecycle und Clie
 
 ## Tests und lokale Entwicklung
 
-Aktuelle gepinnte Laufzeiten: **Python 3.15.2**, **Node 26.13.1**, **PostgreSQL 18.7**. Release-/Kompatibilitätsprüfung: [docs/VERSIONS.md](docs/VERSIONS.md).
+Aktuelle gepinnte Laufzeiten: **Python 3.15.2**, **Node 26.13.1**, **PostgreSQL 18.7**. Für lokale Entwicklung/den SDK-Test zusätzlich `uv 0.13.9` und Node bereitstellen; `.python-version`/`.node-version` halten die Laufzeitwahl fest. `uv sync` kann die passende Python-Version selbst installieren. Release-/Kompatibilitätsprüfung: [docs/VERSIONS.md](docs/VERSIONS.md).
 
 ```sh
 uv sync --locked

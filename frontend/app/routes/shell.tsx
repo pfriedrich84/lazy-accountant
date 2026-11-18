@@ -277,8 +277,10 @@ export default function Shell() {
               ☰
             </IconButton>
             <FormControl size="small" sx={{ minWidth: { xs: 150, sm: 240 } }}>
-              <InputLabel>Firma</InputLabel>
+              <InputLabel id="active-company-label">Firma</InputLabel>
               <Select
+                labelId="active-company-label"
+                id="active-company"
                 label="Firma"
                 value={companyId || ""}
                 onChange={(e) => setCompanyId(Number(e.target.value))}

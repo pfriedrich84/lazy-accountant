@@ -128,7 +128,9 @@ class Document(models.Model):
     version = models.PositiveIntegerField(default=1)
     parser_result = models.JSONField(default=dict)
     parser_error = models.TextField(blank=True)
-    related = models.ManyToManyField("self", blank=True)
+    # Each reference belongs to the revision of its source document. Symmetric
+    # writes would silently change another document without bumping its version.
+    related = models.ManyToManyField("self", blank=True, symmetrical=False, related_name="referenced_by")
     duplicate_of = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

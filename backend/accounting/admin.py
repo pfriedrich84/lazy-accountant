@@ -8,6 +8,9 @@ class MailboxAdmin(admin.ModelAdmin):
     exclude = ["imap_password", "smtp_password"]
     list_display = ["company", "imap_host", "enabled", "last_scan_at"]
 
+    def get_readonly_fields(self, request, obj=None):
+        return ["company"] if obj else []
+
 
 @admin.register(models.AccessToken)
 class TokenAdmin(admin.ModelAdmin):
@@ -40,8 +43,23 @@ for model in (
     models.FileOperation,
 ):
     admin.site.register(model, ImmutableAdmin)
-for model in (models.Company, models.Membership, models.Account, models.Category):
-    admin.site.register(model)
+
+
+@admin.register(models.Company)
+class CompanyAdmin(admin.ModelAdmin):
+    def get_readonly_fields(self, request, obj=None):
+        return ["folder"] if obj else []
+
+
+@admin.register(models.Account, models.Category)
+class AssignmentAdmin(admin.ModelAdmin):
+    def get_readonly_fields(self, request, obj=None):
+        if not obj:
+            return []
+        return ["company", "kind"] if self.model is models.Account else ["company"]
+
+
+admin.site.register(models.Membership)
 admin.site.register(models.Job, ImmutableAdmin)
 admin.site.register(models.Dispatch, ImmutableAdmin)
 admin.site.site_header = "Lazy Accountant · Administration"

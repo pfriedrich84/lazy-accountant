@@ -11,11 +11,7 @@ async function navigate(page: Page, title: string) {
     .click();
 }
 
-test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", async ({
-  page,
-}, info) => {
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+async function login(page: Page) {
   await page.goto("/");
   await page
     .getByLabel("Benutzername")
@@ -27,6 +23,14 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
   await expect(
     page.getByRole("heading", { name: "Bereit für den Monatsabschluss?" }),
   ).toBeVisible();
+}
+
+test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", async ({
+  page,
+}, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await login(page);
   await navigate(page, "Einstellungen");
   await page
     .getByRole("button", { name: "+ Firma anlegen", exact: true })
@@ -153,5 +157,125 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
       () => document.documentElement.scrollWidth <= window.innerWidth + 1,
     ),
   ).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("Zwei vollständige Firmenmonate mit allen Dokumentarten über die Oberfläche", async ({
+  page,
+}, info) => {
+  test.skip(
+    info.project.name !== "desktop",
+    "Der mobile zentrale Ablauf wird separat geprüft.",
+  );
+  test.setTimeout(240_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await login(page);
+  const files = [
+    ["ausgang.pdf", "Ausgangsrechnung"],
+    ["eingang.pdf", "Eingangsrechnung"],
+    ["gutschrift.pdf", "Eingangsgutschrift"],
+    ["storno.pdf", "Ausgangsstorno"],
+    ["konto.pdf", "Kontoauszug PDF"],
+    ["konto.xml", "Kontoauszug CAMT"],
+    ["wertpapiere.pdf", "Wertpapierunterlage"],
+    ["scan.png", "Sonstiger Beleg"],
+  ];
+  for (const [company, folder] of [
+    ["Beispiel GmbH", ""],
+    ["Zweite Firma", "Zweite-Firma"],
+  ]) {
+    await navigate(page, "Übersicht");
+    await page.getByLabel("Firma", { exact: true }).click();
+    await page.getByRole("option", { name: company, exact: true }).click();
+    await page.getByLabel("Übergabemonat", { exact: true }).fill("2026-10");
+    await navigate(page, "Dokumenteingang");
+    await page
+      .getByLabel("Dokumentdateien")
+      .setInputFiles(
+        files.map(([name]) => path.resolve("../var/samples", folder, name)),
+      );
+    await expect(page.getByText(/8 Datei\(en\) übernommen/)).toBeVisible();
+    let bankPdfId = "";
+    for (const [index, [name, kind]] of files.entries()) {
+      await page.getByRole("link", { name, exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name, exact: true }),
+      ).toBeVisible();
+      await page.getByLabel("Dokumentart", { exact: true }).click();
+      await page.getByRole("option", { name: kind, exact: true }).click();
+      await page
+        .getByLabel("Übergabemonat", { exact: true })
+        .last()
+        .fill("2026-10");
+      if (index >= 4 && index <= 6) {
+        await page
+          .getByLabel(index === 6 ? "Depot" : "Bankkonto", { exact: true })
+          .click();
+        await page
+          .getByRole("option", {
+            name: index === 6 ? /Geschäftsdepot/ : /Geschäftskonto/,
+          })
+          .click();
+        await page
+          .getByLabel("Auszugsbeginn", { exact: true })
+          .fill("2026-10-01");
+        await page
+          .getByLabel("Auszugsende", { exact: true })
+          .fill("2026-10-28");
+        if (index === 4) bankPdfId = page.url().split("/").at(-1) || "";
+        if (index === 5) {
+          await page
+            .getByRole("button", {
+              name: "Steueraufteilung, Belegstellen & Verknüpfungen",
+            })
+            .click();
+          await page
+            .getByLabel(
+              "Verweise auf zugehörige Dokument-IDs (eine pro Zeile)",
+              { exact: true },
+            )
+            .fill(bankPdfId);
+        }
+      } else {
+        const outgoing = index === 0 || index === 3;
+        await page
+          .getByLabel("Aussteller / Lieferant")
+          .fill(outgoing ? company : "Beispiel Lieferant");
+        await page
+          .getByLabel("Empfänger / Kunde")
+          .fill(outgoing ? "Beispiel Kunde" : company);
+        await page
+          .getByLabel("Belegnummer", { exact: true })
+          .fill(index === 7 ? "SCAN-2026-10" : `SYNTH-2026-10-${index}`);
+        await page.getByLabel("Belegdatum", { exact: true }).fill("2026-10-15");
+        await page.getByLabel("Netto (z. B. 100.00)").fill("100.00");
+        await page.getByLabel("Steuer (z. B. 20.00)").fill("20.00");
+        await page.getByLabel("Brutto (z. B. 120.00)").fill("120.00");
+        await page.getByLabel("Währung (ISO, z. B. EUR)").fill("EUR");
+      }
+      await page.getByRole("button", { name: "Prüfen & freigeben" }).click();
+      await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+      await navigate(page, "Dokumenteingang");
+    }
+    await navigate(page, "Übergabe & Versand");
+    await page
+      .getByRole("button", { name: "Vorschau erstellen", exact: true })
+      .click();
+    await expect(page.getByText(/8 Originale/)).toBeVisible();
+    await page
+      .getByRole("button", { name: "Paket verbindlich erzeugen" })
+      .click();
+    await expect(
+      page.getByRole("link", { name: "ZIP herunterladen" }),
+    ).toBeVisible({ timeout: 45_000 });
+    const download = page.waitForEvent("download");
+    await page.getByRole("link", { name: "ZIP herunterladen" }).click();
+    expect((await download).suggestedFilename()).toMatch(/paket-v\d+\.zip/);
+    await page.screenshot({
+      path: info.outputPath(`${folder || "Beispiel-GmbH"}-monat.png`),
+      fullPage: true,
+    });
+  }
   expect(errors).toEqual([]);
 });

@@ -47,6 +47,10 @@ def test_declared_camt_namespaces(namespace):
 def test_currency_scale_and_decimal_rounding():
     with pytest.raises(ValidationError):
         Metadata(currency="ZZZ")
+    for rate in ["-20", "101"]:
+        with pytest.raises(ValidationError):
+            Metadata(taxes=[{"rate": rate}])
+    assert "Währung fehlt" in validation_issues("receipt", 1, "2026-10", None, {"gross": "12.34"})
     for currency in ["EUR", "JPY", "KWD", "CLF"]:
         assert Currency(currency).exponent is not None
     issues = validation_issues(
@@ -96,6 +100,87 @@ def test_account_category_period_and_missing_fields(actor, companies):
     saved = services.save_result(actor, base)
     assert "Konto/Depot ungeklärt" in saved["issues"]
     assert "Auszugszeitraum unvollständig" in saved["issues"]
+
+
+def test_admin_preserves_folder_and_assignment_scope(companies):
+    from django.contrib import admin
+    from accounting.models import Category, Company
+
+    company = companies[0]
+    account = Account.objects.filter(company=company).first()
+    category = Category.objects.filter(company=company).first()
+    assert "folder" in admin.site._registry[Company].get_readonly_fields(None, company)
+    assert set(admin.site._registry[Account].get_readonly_fields(None, account)) == {"company", "kind"}
+    assert "company" in admin.site._registry[Category].get_readonly_fields(None, category)
+    assert "folder" not in admin.site._registry[Company].get_readonly_fields(None, None)
+
+
+def test_quarterly_statement_requires_explicit_reason_but_keeps_actual_dates(actor, companies):
+    company = companies[0]
+    account = Account.objects.get(company=company, kind="depot")
+    original = sample_pdf(["Depot Quartal", "2026-08-01 bis 2026-10-28"])
+    doc = services.ingest(actor, "quartal.pdf", original, company.id)["document"]
+    payload = {
+        "document_id": doc["id"],
+        "base_version": 1,
+        "company_id": company.id,
+        "kind": "security_pdf",
+        "account_id": account.id,
+        "period": "2026-10",
+        "approve": True,
+        "metadata": {"period_start": "2026-08-01", "period_end": "2026-10-28"},
+    }
+    with pytest.raises(DomainError, match="Prüfpunkte"):
+        services.save_result(actor, payload)
+    payload["metadata"]["period_assignment_confirmed"] = True
+    with pytest.raises(DomainError, match="Prüfpunkte"):
+        services.save_result(actor, payload)
+    payload["metadata"]["period_assignment_reason"] = "Quartalsauszug gesammelt im Endmonat übergeben"
+    saved = services.save_result(actor, payload)
+    assert saved["status"] == "ready" and saved["metadata"]["period_start"] == "2026-08-01"
+    assert storage.path(saved["filed_path"]).read_bytes() == original
+    p = packages.create_package(actor, company.id, ["2026-10"], "quarterly")
+    assert (
+        p["snapshot"]["documents"][0]["metadata"]["period_assignment_reason"]
+        == payload["metadata"]["period_assignment_reason"]
+    )
+
+
+def test_references_preserve_manual_source_revision_when_agent_updates_target(actor, companies):
+    source = services.ingest(actor, "konto.pdf", sample_pdf(["source"]), companies[0].id)["document"]
+    target = services.ingest(actor, "beleg.pdf", sample_pdf(["target"]), companies[0].id)["document"]
+
+    def update(d, version, company, **extra):
+        return services.save_result(
+            actor,
+            {
+                "document_id": d["id"],
+                "base_version": version,
+                "company_id": company.id,
+                "kind": "receipt",
+                "period": "2026-10",
+                "metadata": {},
+                **extra,
+            },
+        )
+
+    update(source, 1, companies[0], related_ids=[target["id"]])
+    saved = update(target, 1, companies[0])  # Older target state must not remove the source's manual link.
+    assert saved["related_ids"] == []
+    assert saved["referenced_by_ids"] == [source["id"]]
+    src = Document.objects.get(id=source["id"])
+    assert src.version == 2
+    assert src.revisions.get(version=2).snapshot["related_ids"] == [target["id"]]
+    with pytest.raises(DomainError, match="verweisen"):
+        update(target, 2, companies[1])
+    update(source, 2, companies[0], duplicate_of=target["id"])
+    with pytest.raises(DomainError, match="verweisen"):
+        update(target, 2, companies[1])
+    update(source, 3, companies[0])
+    moved = update(target, 2, companies[1])
+    assert moved["company_id"] == companies[1].id
+    assert moved["referenced_by_ids"] == []
+    assert storage.read_original(Document.objects.get(id=target["id"])) == sample_pdf(["target"])
 
 
 def test_bootstrap_two_complete_isolated_months(user, actor, companies, tmp_path, monkeypatch):

@@ -52,8 +52,9 @@ Vollständiges Eingabeschema: `DocumentResult` in `backend/accounting/schemas.py
 - `company_id`, `kind`, `period`, `account_id`, `category_id` sind die vollständige gewünschte Zuordnung. Fehlendes bleibt `null`.
 - `metadata` enthält Rechnungspartner/-nummer/-daten, Originalwährung, Dezimalbeträge/Steueraufteilungen oder Konto-/Depotzeitraum; `note`, `open_points`, feldbezogene `evidence` sind getrennt korrigierbar.
 - Geld und Steuersätze als Strings, **keine Float-Arithmetik**. Fehlendes nicht als `0` erfinden.
+- Mehrmonatige Konto-/Depotzeiträume bleiben zunächst offen. Nur bei ausdrücklicher Zuordnungsregel/-bestätigung `metadata.period_assignment_confirmed=true` **und** nachvollziehbare `period_assignment_reason` setzen. Die Originaldaten `period_start`/`period_end` bleiben unverändert; die Begründung erscheint im Snapshot und CSV/XLSX.
 - `approve=false` speichert einen überprüfbaren Zwischenstand. `approve=true` erfordert keine offenen Server-/Agenten-Prüfpunkte.
-- `related_ids` verbindet etwa CAMT und PDF; beide Originale bleiben enthalten. `duplicate_of` markiert eine bestätigte firmeninterne Dublette, ohne sie zu löschen.
+- `related_ids` sind gerichtete, revisionsgeschützte Verweise **dieses Quelldokuments**, etwa vom CAMT auf das PDF. Beide Originale bleiben enthalten. Eingehende Verweise erscheinen nur lesend unter `referenced_by_ids`; ein älterer Lauf am Zieldokument kann damit keine manuelle Verknüpfung am Quelldokument entfernen. Änderung/Entfernung erfolgt mit der Ausgangsversion des jeweiligen Quelldokuments. Vor einem Firmenwechsel eingehende Verweise/Dubletten ausdrücklich in der bisherigen Firma lösen. `duplicate_of` markiert eine bestätigte firmeninterne Dublette, ohne sie zu löschen.
 - Ausgangsversion wird unter Zeilensperre verglichen; bei Konflikt HTTP 409 bzw. MCP-Toolfehler. Neuere manuelle Korrekturen niemals durch bloßes Erhöhen der Versionsnummer umgehen.
 
 REST und MCP schreiben dieselben Revisionen mit Benutzer, Quelle (`manual` / `agent:<run_id>`), Zeitpunkt, Ausgangs- und Ergebnisversion.
@@ -93,7 +94,16 @@ asyncio.run(main())
 
 SDK v2 verwendet hier `httpx2` (transitiv im Lockfile), nicht den v1-Client mit einem dreiteiligen Stream-Tupel. Listen können im strukturierten Ergebnis unter `result` gewrappt sein; `scripts/mcp_client.py` behandelt dies.
 
-`uv run python scripts/mcp_client.py --exercise --mail` ist ein reproduzierbarer echter Ende-zu-Ende-Test mit neuer synthetischer Firma und kontrolliertem GreenMail. Ohne `--exercise` führt der Client nur Discovery/Firmenabfrage aus.
+`uv run python scripts/mcp_client.py --exercise --mail --report var/smoke-report.json` ist ein reproduzierbarer echter Ende-zu-Ende-Test mit neuer synthetischer Firma und kontrolliertem GreenMail. Ohne `--exercise`/`--verify-report` führt der Client nur Discovery/Firmenabfrage aus.
+
+Nach Neustart oder gemeinsamem Restore lässt sich **derselbe bestehende** synthetische Ablauf ohne neue Dokumente/Neuversand prüfen:
+
+```sh
+uv run python scripts/mcp_client.py --verify-report var/smoke-report.json --mail \
+  --report var/replay-report.json
+```
+
+Dies prüft die ursprünglichen Original-/Paketprüfsummen, wiederverwendet denselben Paketjob/Versandschlüssel, führt einen neuen IMAP-Abruf vom wiederhergestellten Checkpoint aus und weist null neue Anhänge sowie unveränderte Empfängerpostfach-Mailanzahl nach. Beide Modi widerrufen ihren temporären Token im `finally`-Block und prüfen auch den Widerrufsstatus. Die Reports enthalten IDs/Prüfsummen/Idempotenzpräfixe, keine Zugangstoken oder Mailpasswörter.
 
 ## Orca-Live-Einrichtung
 
