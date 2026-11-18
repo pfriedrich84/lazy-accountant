@@ -7,36 +7,68 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounting', '0001_initial'),
+        ("accounting", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='ProcessingClaim',
+            name="ProcessingClaim",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('run_id', models.CharField(max_length=120)),
-                ('base_version', models.PositiveIntegerField()),
-                ('expires_at', models.DateTimeField()),
-                ('actor', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
-                ('document', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to='accounting.document')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("run_id", models.CharField(max_length=120)),
+                ("base_version", models.PositiveIntegerField()),
+                ("expires_at", models.DateTimeField()),
+                (
+                    "actor",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL
+                    ),
+                ),
+                (
+                    "document",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE, to="accounting.document"
+                    ),
+                ),
             ],
         ),
         migrations.CreateModel(
-            name='UploadTicket',
+            name="UploadTicket",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('filename', models.CharField(max_length=255)),
-                ('expected_size', models.PositiveBigIntegerField()),
-                ('expected_sha256', models.CharField(max_length=64)),
-                ('uploaded', models.BooleanField(default=False)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('actor', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
-                ('company', models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, to='accounting.company')),
-                ('document', models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, to='accounting.document')),
+                (
+                    "id",
+                    models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False),
+                ),
+                ("filename", models.CharField(max_length=255)),
+                ("expected_size", models.PositiveBigIntegerField()),
+                ("expected_sha256", models.CharField(max_length=64)),
+                ("uploaded", models.BooleanField(default=False)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "actor",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL
+                    ),
+                ),
+                (
+                    "company",
+                    models.ForeignKey(
+                        null=True, on_delete=django.db.models.deletion.PROTECT, to="accounting.company"
+                    ),
+                ),
+                (
+                    "document",
+                    models.ForeignKey(
+                        null=True, on_delete=django.db.models.deletion.PROTECT, to="accounting.document"
+                    ),
+                ),
             ],
         ),
     ]

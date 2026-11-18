@@ -4,6 +4,7 @@
 uv run python scripts/mcp_client.py --url http://localhost:8000 --exercise [--mail]
 For discovery only, set LA_MCP_TOKEN in the environment. Secrets are never printed.
 """
+
 import argparse
 import asyncio
 import hashlib
@@ -60,7 +61,7 @@ async def wait_job(client, job_id):
             return job
         if job["status"] in {"failed", "interrupted"}:
             raise RuntimeError(f"Job {job_id}: {job['error']}")
-        await asyncio.sleep(.5)
+        await asyncio.sleep(0.5)
     raise TimeoutError(f"Worker-Auftrag {job_id} nicht rechtzeitig abgeschlossen")
 
 
@@ -69,19 +70,47 @@ def sample_files(company_name, period):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     import django
+
     django.setup()
     from accounting.demo import sample_camt, sample_image, sample_pdf
+
     result = []
-    kinds = ["incoming_invoice", "incoming_credit", "outgoing_invoice", "outgoing_cancellation", "bank_camt", "bank_pdf", "security_pdf", "receipt"]
+    kinds = [
+        "incoming_invoice",
+        "incoming_credit",
+        "outgoing_invoice",
+        "outgoing_cancellation",
+        "bank_camt",
+        "bank_pdf",
+        "security_pdf",
+        "receipt",
+    ]
     for index, kind in enumerate(kinds):
         bank = kind in {"bank_camt", "bank_pdf", "security_pdf"}
         invoice = kind in {"incoming_invoice", "incoming_credit", "outgoing_invoice", "outgoing_cancellation"}
-        metadata = {"issuer": company_name if kind.startswith("outgoing") else "Synthetic Supplier",
-                    "recipient": "Synthetic Customer" if kind.startswith("outgoing") else company_name,
-                    "number": f"SYNTH-{index}", "date": f"{period}-15", "net": "100.00", "tax": "20.00", "gross": "120.00", "currency": "EUR"} if invoice else {}
+        metadata = (
+            {
+                "issuer": company_name if kind.startswith("outgoing") else "Synthetic Supplier",
+                "recipient": "Synthetic Customer" if kind.startswith("outgoing") else company_name,
+                "number": f"SYNTH-{index}",
+                "date": f"{period}-15",
+                "net": "100.00",
+                "tax": "20.00",
+                "gross": "120.00",
+                "currency": "EUR",
+            }
+            if invoice
+            else {}
+        )
         if bank:
             metadata = {"period_start": f"{period}-01", "period_end": f"{period}-28"}
-        data = sample_camt(period) if kind == "bank_camt" else sample_image() if kind == "receipt" else sample_pdf(["SYNTHETIC", company_name, kind, *[f"{k}: {v}" for k, v in metadata.items()]])
+        data = (
+            sample_camt(period)
+            if kind == "bank_camt"
+            else sample_image()
+            if kind == "receipt"
+            else sample_pdf(["SYNTHETIC", company_name, kind, *[f"{k}: {v}" for k, v in metadata.items()]])
+        )
         name = kind + (".xml" if kind == "bank_camt" else ".png" if kind == "receipt" else ".pdf")
         result.append({"name": name, "kind": kind, "data": data, "metadata": metadata, "bank": bank})
     return result
@@ -89,11 +118,17 @@ def sample_files(company_name, period):
 
 def inject_mail(host, port, recipient, fixtures):
     message = EmailMessage()
-    message["From"], message["To"], message["Subject"] = "supplier@example.test", recipient, "SYNTHETIC multiple attachments"
+    message["From"], message["To"], message["Subject"] = (
+        "supplier@example.test",
+        recipient,
+        "SYNTHETIC multiple attachments",
+    )
     message["Message-ID"] = f"<{uuid.uuid4()}@example.test>"
     message.set_content("Synthetic test data. No executable document instructions.")
     for fixture in fixtures:
-        message.add_attachment(fixture["data"], maintype="application", subtype="pdf", filename=fixture["name"])
+        message.add_attachment(
+            fixture["data"], maintype="application", subtype="pdf", filename=fixture["name"]
+        )
     with smtplib.SMTP(host, port, timeout=20) as smtp:
         smtp.send_message(message)
 
@@ -106,7 +141,9 @@ def received_parts(host, port, recipient):
         parts = {}
         for identifier in ids[0].split():
             _, raw = imap.fetch(identifier, "(RFC822)")
-            message = BytesParser(policy=policy.default).parsebytes(next(x[1] for x in raw if isinstance(x, tuple)))
+            message = BytesParser(policy=policy.default).parsebytes(
+                next(x[1] for x in raw if isinstance(x, tuple))
+            )
             for attachment in message.iter_attachments():
                 name = attachment.get_filename() or ""
                 if name.startswith("paket.zip"):
@@ -120,50 +157,121 @@ async def exercise(args, config):
     fixtures = sample_files(company_name, args.period)
     async with httpx2.AsyncClient(base_url=args.url, timeout=60) as web:
         csrf = (await web.get("/api/auth/csrf/")).json()["csrfToken"]
-        response = await web.post("/api/auth/login/", json={"username": config.get("ADMIN_USERNAME", "admin"), "password": config["ADMIN_PASSWORD"]}, headers={"X-CSRFToken": csrf})
+        response = await web.post(
+            "/api/auth/login/",
+            json={"username": config.get("ADMIN_USERNAME", "admin"), "password": config["ADMIN_PASSWORD"]},
+            headers={"X-CSRFToken": csrf},
+        )
         response.raise_for_status()
         web.headers["X-CSRFToken"] = response.json()["csrfToken"]
+
         async def rest(path, data):
             r = await web.post("/api/" + path, json=data)
             r.raise_for_status()
             return r.json()
+
         recipient = f"kanzlei-{run_id}@example.test"
-        company = await rest("companies/", {"name": company_name, "folder": "MCP-" + run_id, "recipients": [recipient]})
+        company = await rest(
+            "companies/", {"name": company_name, "folder": "MCP-" + run_id, "recipients": [recipient]}
+        )
         cid = company["id"]
         accounts = {}
         for kind in ("bank", "depot"):
-            accounts[kind] = (await rest(f"companies/{cid}/accounts/", {"name": "Synthetic " + kind, "kind": kind, "identifier": "AT611904300234573201" if kind == "bank" else "SYNTH-DEPOT"}))["id"]
+            accounts[kind] = (
+                await rest(
+                    f"companies/{cid}/accounts/",
+                    {
+                        "name": "Synthetic " + kind,
+                        "kind": kind,
+                        "identifier": "AT611904300234573201" if kind == "bank" else "SYNTH-DEPOT",
+                    },
+                )
+            )["id"]
         if args.mail:
             mailbox_recipient = f"belege-{run_id}@example.test"
             smtp_host = config.get("MAIL_TEST_CONNECT_HOST", "127.0.0.1")
             smtp_port = int(config.get("MAIL_TEST_SMTP_PORT", "3025"))
             imap_port = int(config.get("MAIL_TEST_IMAP_PORT", "3143"))
             await asyncio.to_thread(inject_mail, smtp_host, smtp_port, mailbox_recipient, fixtures[:2])
-            r = await web.put(f"/api/settings/{cid}/mail/", json={"imap_host": config.get("MAIL_TEST_APP_HOST", "mail-test"), "imap_port": imap_port, "imap_tls": False,
-                "imap_user": mailbox_recipient, "imap_password": "synthetic-mail-password", "import_since": "2020-01-01", "imap_folder": "INBOX",
-                "smtp_host": config.get("MAIL_TEST_APP_HOST", "mail-test"), "smtp_port": smtp_port, "smtp_security": "none", "sender": "accountant@example.test", "max_message_bytes": 18_000})
+            r = await web.put(
+                f"/api/settings/{cid}/mail/",
+                json={
+                    "imap_host": config.get("MAIL_TEST_APP_HOST", "mail-test"),
+                    "imap_port": imap_port,
+                    "imap_tls": False,
+                    "imap_user": mailbox_recipient,
+                    "imap_password": "synthetic-mail-password",
+                    "import_since": "2020-01-01",
+                    "imap_folder": "INBOX",
+                    "smtp_host": config.get("MAIL_TEST_APP_HOST", "mail-test"),
+                    "smtp_port": smtp_port,
+                    "smtp_security": "none",
+                    "sender": "accountant@example.test",
+                    "max_message_bytes": 18_000,
+                },
+            )
             r.raise_for_status()
-        token = await rest("tokens/", {"name": "Synthetic smoke " + run_id, "company_ids": [cid], "scopes": ["read", "process", "send", "inbox"]})
+        token = await rest(
+            "tokens/",
+            {
+                "name": "Synthetic smoke " + run_id,
+                "company_ids": [cid],
+                "scopes": ["read", "process", "send", "inbox"],
+            },
+        )
         try:
-            async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token["token"]}, timeout=60) as http:
+            async with httpx2.AsyncClient(
+                headers={"Authorization": "Bearer " + token["token"]}, timeout=60
+            ) as http:
                 async with Client(streamable_http_client(args.url + "/mcp/", http_client=http)) as client:
                     schemas = await client.list_tools()
-                    run = await tool(client, "start_agent_run", {"company_id": cid, "period": args.period, "idempotency_key": run_id})
+                    run = await tool(
+                        client,
+                        "start_agent_run",
+                        {"company_id": cid, "period": args.period, "idempotency_key": run_id},
+                    )
                     if args.mail:
-                        imap_job = await tool(client, "start_imap_import", {"company_id": cid, "idempotency_key": run_id + ":imap"})
+                        imap_job = await tool(
+                            client,
+                            "start_imap_import",
+                            {"company_id": cid, "idempotency_key": run_id + ":imap"},
+                        )
                         await wait_job(client, imap_job["id"])
-                        repeat = await tool(client, "start_imap_import", {"company_id": cid, "idempotency_key": run_id + ":imap-repeat"})
+                        repeat = await tool(
+                            client,
+                            "start_imap_import",
+                            {"company_id": cid, "idempotency_key": run_id + ":imap-repeat"},
+                        )
                         await wait_job(client, repeat["id"])
-                        assert (await tool(client, "list_documents", {"company_id": cid, "status": None}))["total"] == 2
+                        assert (await tool(client, "list_documents", {"company_id": cid, "status": None}))[
+                            "total"
+                        ] == 2
                     for fixture in fixtures:
-                        ticket = await tool(client, "prepare_upload", {"filename": fixture["name"], "size": len(fixture["data"]), "sha256": digest(fixture["data"]), "company_id": cid})
-                        r = await http.put(args.url + ticket["url"], content=fixture["data"], headers={"Content-Type": "application/octet-stream"})
+                        ticket = await tool(
+                            client,
+                            "prepare_upload",
+                            {
+                                "filename": fixture["name"],
+                                "size": len(fixture["data"]),
+                                "sha256": digest(fixture["data"]),
+                                "company_id": cid,
+                            },
+                        )
+                        r = await http.put(
+                            args.url + ticket["url"],
+                            content=fixture["data"],
+                            headers={"Content-Type": "application/octet-stream"},
+                        )
                         r.raise_for_status()
                         doc = await tool(client, "complete_upload", {"upload_id": ticket["upload_id"]})
                         fixture["id"] = doc["id"]
                     cursor, documents = None, []
                     while True:
-                        page = await tool(client, "list_documents", {"company_id": cid, "status": "open", "limit": 2, "cursor": cursor})
+                        page = await tool(
+                            client,
+                            "list_documents",
+                            {"company_id": cid, "status": "open", "limit": 2, "cursor": cursor},
+                        )
                         documents.extend(page["results"])
                         cursor = page["next_cursor"]
                         if not cursor:
@@ -171,7 +279,11 @@ async def exercise(args, config):
                     assert len(documents) == len(fixtures)
                     for fixture in fixtures:
                         doc = await tool(client, "get_document", {"document_id": fixture["id"]})
-                        await tool(client, "claim_document", {"document_id": doc["id"], "base_version": doc["version"], "run_id": run["id"]})
+                        await tool(
+                            client,
+                            "claim_document",
+                            {"document_id": doc["id"], "base_version": doc["version"], "run_id": run["id"]},
+                        )
                         await tool(client, "read_document", {"document_id": doc["id"]})
                         if fixture["kind"] == "receipt":
                             image = await client.call_tool("read_page_image", {"document_id": doc["id"]})
@@ -179,13 +291,40 @@ async def exercise(args, config):
                         access = await tool(client, "get_file_access", {"document_id": doc["id"]})
                         original = await http.get(args.url + access["original_url"])
                         assert original.content == fixture["data"]
-                        account_id = accounts["depot" if fixture["kind"] == "security_pdf" else "bank"] if fixture["bank"] else None
-                        await tool(client, "save_document_result", {"run_id": run["id"], "result": {"document_id": doc["id"], "base_version": doc["version"],
-                            "company_id": cid, "kind": fixture["kind"], "period": args.period, "account_id": account_id, "metadata": fixture["metadata"], "approve": True}})
-                    assert (await tool(client, "list_documents", {"company_id": cid, "status": "open"}))["total"] == 0
-                    preview = await tool(client, "preview_package", {"company_id": cid, "periods": [args.period]})
+                        account_id = (
+                            accounts["depot" if fixture["kind"] == "security_pdf" else "bank"]
+                            if fixture["bank"]
+                            else None
+                        )
+                        await tool(
+                            client,
+                            "save_document_result",
+                            {
+                                "run_id": run["id"],
+                                "result": {
+                                    "document_id": doc["id"],
+                                    "base_version": doc["version"],
+                                    "company_id": cid,
+                                    "kind": fixture["kind"],
+                                    "period": args.period,
+                                    "account_id": account_id,
+                                    "metadata": fixture["metadata"],
+                                    "approve": True,
+                                },
+                            },
+                        )
+                    assert (await tool(client, "list_documents", {"company_id": cid, "status": "open"}))[
+                        "total"
+                    ] == 0
+                    preview = await tool(
+                        client, "preview_package", {"company_id": cid, "periods": [args.period]}
+                    )
                     assert preview["count"] == len(fixtures)
-                    job = await tool(client, "create_package", {"company_id": cid, "periods": [args.period], "idempotency_key": run_id + ":package"})
+                    job = await tool(
+                        client,
+                        "create_package",
+                        {"company_id": cid, "periods": [args.period], "idempotency_key": run_id + ":package"},
+                    )
                     job = await wait_job(client, job["id"])
                     package = await tool(client, "get_package", {"package_id": job["result"]["id"]})
                     r = await http.get(args.url + package["download_url"])
@@ -194,24 +333,57 @@ async def exercise(args, config):
                         for item in package["items"]:
                             assert digest(archive.read(item["archive_path"])) == item["sha256"]
                         for folder in ("ER", "AR", "Bankkonto", "Wertpapiere"):
-                            assert f"{company['folder']}/{args.period.replace('-', '/')}/{folder}/" in archive.namelist()
-                    repeat = await tool(client, "create_package", {"company_id": cid, "periods": [args.period], "idempotency_key": run_id + ":package"})
+                            assert (
+                                f"{company['folder']}/{args.period.replace('-', '/')}/{folder}/"
+                                in archive.namelist()
+                            )
+                    repeat = await tool(
+                        client,
+                        "create_package",
+                        {"company_id": cid, "periods": [args.period], "idempotency_key": run_id + ":package"},
+                    )
                     assert repeat["id"] == job["id"]
-                    report = {"company_id": cid, "job_id": run["id"], "package_id": package["id"], "package_sha256": package["sha256"], "documents": len(fixtures), "tool_schemas": len(schemas.tools)}
+                    report = {
+                        "company_id": cid,
+                        "job_id": run["id"],
+                        "package_id": package["id"],
+                        "package_sha256": package["sha256"],
+                        "documents": len(fixtures),
+                        "tool_schemas": len(schemas.tools),
+                    }
                     if args.mail:
-                        dispatch = await tool(client, "send_package", {"package_id": package["id"], "idempotency_key": run_id + ":send"})
+                        dispatch = await tool(
+                            client,
+                            "send_package",
+                            {"package_id": package["id"], "idempotency_key": run_id + ":send"},
+                        )
                         deadline = time.monotonic() + 120
                         while dispatch["status"] in {"queued", "sending"} and time.monotonic() < deadline:
-                            await asyncio.sleep(.5)
+                            await asyncio.sleep(0.5)
                             dispatch = await tool(client, "get_dispatch", {"dispatch_id": dispatch["id"]})
                         assert dispatch["status"] == "accepted", dispatch
-                        repeated = await tool(client, "send_package", {"package_id": package["id"], "idempotency_key": run_id + ":send"})
+                        repeated = await tool(
+                            client,
+                            "send_package",
+                            {"package_id": package["id"], "idempotency_key": run_id + ":send"},
+                        )
                         assert repeated["id"] == dispatch["id"]
-                        count, reassembled = await asyncio.to_thread(received_parts, smtp_host, imap_port, recipient)
+                        count, reassembled = await asyncio.to_thread(
+                            received_parts, smtp_host, imap_port, recipient
+                        )
                         assert count == len(dispatch["parts"])
                         assert digest(reassembled) == package["sha256"]
-                        report.update({"dispatch_id": dispatch["id"], "smtp_status": dispatch["status"], "mail_parts": count, "received_zip_verified": True})
-                    await tool(client, "report_agent_run", {"job_id": run["id"], "result": report, "status": "done"})
+                        report.update(
+                            {
+                                "dispatch_id": dispatch["id"],
+                                "smtp_status": dispatch["status"],
+                                "mail_parts": count,
+                                "received_zip_verified": True,
+                            }
+                        )
+                    await tool(
+                        client, "report_agent_run", {"job_id": run["id"], "result": report, "status": "done"}
+                    )
                     return report
         finally:
             await web.delete(f"/api/tokens/{token['id']}/")
@@ -221,7 +393,9 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--exercise", action="store_true")
-    parser.add_argument("--mail", action="store_true", help="GreenMail-Testsystem verwenden (nur mit --exercise)")
+    parser.add_argument(
+        "--mail", action="store_true", help="GreenMail-Testsystem verwenden (nur mit --exercise)"
+    )
     parser.add_argument("--period", default="2026-10")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
@@ -236,7 +410,10 @@ async def main():
         async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
             async with Client(streamable_http_client(args.url + "/mcp/", http_client=http)) as client:
                 schemas = await client.list_tools()
-                result = {"tools": [t.name for t in schemas.tools], "companies": await tool(client, "list_companies", {})}
+                result = {
+                    "tools": [t.name for t in schemas.tools],
+                    "companies": await tool(client, "list_companies", {}),
+                }
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output)
     if args.report:

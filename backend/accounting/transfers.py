@@ -17,8 +17,21 @@ def prepare_upload(actor, filename, size, sha256, company_id=None):
         actor.require_inbox(actor.user_id, "process")
     if not 0 < size <= settings.MAX_FILE_BYTES or not re.fullmatch(r"[a-f0-9]{64}", sha256):
         raise DomainError("Ungültige Dateigröße oder SHA256.")
-    ticket = UploadTicket.objects.create(actor_id=actor.user_id, company_id=company_id, filename=filename[:255], expected_size=size, expected_sha256=sha256)
-    return {"upload_id": str(ticket.id), "url": f"/api/uploads/{ticket.id}/", "method": "PUT", "content_type": "application/octet-stream", "authentication": "Authorization: Bearer <token>", "max_bytes": settings.MAX_FILE_BYTES}
+    ticket = UploadTicket.objects.create(
+        actor_id=actor.user_id,
+        company_id=company_id,
+        filename=filename[:255],
+        expected_size=size,
+        expected_sha256=sha256,
+    )
+    return {
+        "upload_id": str(ticket.id),
+        "url": f"/api/uploads/{ticket.id}/",
+        "method": "PUT",
+        "content_type": "application/octet-stream",
+        "authentication": "Authorization: Bearer <token>",
+        "max_bytes": settings.MAX_FILE_BYTES,
+    }
 
 
 def get_ticket(actor, upload_id, lock=False):
@@ -69,8 +82,25 @@ def claim_document(actor, document_id, run_id, base_version):
         if d.version != base_version:
             raise DomainError("Ausgangsversion ist nicht mehr aktuell.", 409)
         prior = ProcessingClaim.objects.filter(document=d).first()
-        if prior and prior.expires_at > timezone.now() and (prior.actor_id != actor.user_id or prior.run_id != run_id):
+        if (
+            prior
+            and prior.expires_at > timezone.now()
+            and (prior.actor_id != actor.user_id or prior.run_id != run_id)
+        ):
             raise DomainError("Dokument ist bereits für einen anderen Lauf reserviert.", 409)
-        claim, _ = ProcessingClaim.objects.update_or_create(document=d, defaults={"actor_id": actor.user_id, "run_id": run_id[:120], "base_version": d.version, "expires_at": timezone.now() + timedelta(minutes=20)})
-    return {"document_id": str(d.id), "base_version": d.version, "run_id": claim.run_id, "expires_at": claim.expires_at.isoformat(),
-            "note": "Manuelle Korrekturen bleiben erlaubt; Ergebnisübernahme prüft die Ausgangsversion erneut."}
+        claim, _ = ProcessingClaim.objects.update_or_create(
+            document=d,
+            defaults={
+                "actor_id": actor.user_id,
+                "run_id": run_id[:120],
+                "base_version": d.version,
+                "expires_at": timezone.now() + timedelta(minutes=20),
+            },
+        )
+    return {
+        "document_id": str(d.id),
+        "base_version": d.version,
+        "run_id": claim.run_id,
+        "expires_at": claim.expires_at.isoformat(),
+        "note": "Manuelle Korrekturen bleiben erlaubt; Ergebnisübernahme prüft die Ausgangsversion erneut.",
+    }

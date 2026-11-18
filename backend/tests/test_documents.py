@@ -15,9 +15,24 @@ pytestmark = pytest.mark.django_db
 
 
 def result(doc, company_id, **overrides):
-    return {"document_id": doc["id"], "base_version": doc["version"], "company_id": company_id,
-            "kind": "incoming_invoice", "period": "2026-10", "metadata": {"issuer": "Lieferant", "recipient": "Beispiel GmbH",
-            "number": "RE-1", "date": "2026-10-14", "net": "100.00", "tax": "20.00", "gross": "120.00", "currency": "EUR"}, **overrides}
+    return {
+        "document_id": doc["id"],
+        "base_version": doc["version"],
+        "company_id": company_id,
+        "kind": "incoming_invoice",
+        "period": "2026-10",
+        "metadata": {
+            "issuer": "Lieferant",
+            "recipient": "Beispiel GmbH",
+            "number": "RE-1",
+            "date": "2026-10-14",
+            "net": "100.00",
+            "tax": "20.00",
+            "gross": "120.00",
+            "currency": "EUR",
+        },
+        **overrides,
+    }
 
 
 def test_exact_original_and_folders(actor, companies):
@@ -109,7 +124,9 @@ def test_camt_errors_preserve_original(actor, companies):
     doc = Document.objects.get(id=r["id"])
     assert "Nicht unterstützter" in doc.parser_error
     assert storage.read_original(doc) == unsupported
-    malicious = b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><Document>&e;</Document>'
+    malicious = (
+        b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><Document>&e;</Document>'
+    )
     r = services.ingest(actor, "evil.xml", malicious, companies[0].id)["document"]
     assert Document.objects.get(id=r["id"]).parser_error
 
@@ -138,10 +155,28 @@ def test_pages_text_and_image(actor, companies):
 
 def test_rest_upload_and_login_csrf(client, companies):
     f = SimpleUploadedFile("a.pdf", sample_pdf(["REST"]), content_type="application/pdf")
-    response = client.post("/api/documents/", {"files": [f], "company_id": companies[0].id}, format="multipart")
+    response = client.post(
+        "/api/documents/", {"files": [f], "company_id": companies[0].id}, format="multipart"
+    )
     assert response.status_code == 201
     from django.test import Client
+
     anonymous = Client(enforce_csrf_checks=True)
-    assert anonymous.post("/api/auth/login/", '{"username":"test","password":"test-password-12345"}', content_type="application/json").status_code == 403
+    assert (
+        anonymous.post(
+            "/api/auth/login/",
+            '{"username":"test","password":"test-password-12345"}',
+            content_type="application/json",
+        ).status_code
+        == 403
+    )
     token = anonymous.get("/api/auth/csrf/").json()["csrfToken"]
-    assert anonymous.post("/api/auth/login/", '{"username":"test","password":"test-password-12345"}', content_type="application/json", HTTP_X_CSRFTOKEN=token).status_code == 200
+    assert (
+        anonymous.post(
+            "/api/auth/login/",
+            '{"username":"test","password":"test-password-12345"}',
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+        ).status_code
+        == 200
+    )

@@ -19,8 +19,15 @@ pytestmark = pytest.mark.django_db
 
 
 def configured_mailbox(company):
-    return Mailbox.objects.create(company=company, imap_host="test-imap", imap_user="test", import_since=date(2026, 10, 1),
-                                  smtp_host="test-smtp", sender="buchhaltung@example.test", smtp_security="none")
+    return Mailbox.objects.create(
+        company=company,
+        imap_host="test-imap",
+        imap_user="test",
+        import_since=date(2026, 10, 1),
+        smtp_host="test-smtp",
+        sender="buchhaltung@example.test",
+        smtp_security="none",
+    )
 
 
 def test_full_month_export_and_immutable_corrections(user, actor, companies):
@@ -35,7 +42,7 @@ def test_full_month_export_and_immutable_corrections(user, actor, companies):
     with zipfile.ZipFile(io.BytesIO(original_zip)) as z:
         for folder in storage.FOLDERS:
             assert f"{c.folder}/2026/10/{folder}/" in z.namelist()
-        assert sum(n.endswith('/konto.xml') for n in z.namelist()) == 0  # collision-safe ID prefix
+        assert sum(n.endswith("/konto.xml") for n in z.namelist()) == 0  # collision-safe ID prefix
         for item in package.items.all():
             assert storage.checksum(z.read(item.archive_path)) == item.sha256
         base = f"{c.folder}/2026/10/"
@@ -45,8 +52,18 @@ def test_full_month_export_and_immutable_corrections(user, actor, companies):
         for item in manifest["files"]:
             assert storage.checksum(z.read(item["path"])) == item["sha256"]
     doc = services.document_data(Document.objects.get(id=ids[0]), True)
-    services.save_result(actor, {"document_id": doc["id"], "base_version": doc["version"], "company_id": c.id,
-        "kind": doc["kind"], "period": "2026-11", "metadata": doc["metadata"], "approve": True})
+    services.save_result(
+        actor,
+        {
+            "document_id": doc["id"],
+            "base_version": doc["version"],
+            "company_id": c.id,
+            "kind": doc["kind"],
+            "period": "2026-11",
+            "metadata": doc["metadata"],
+            "approve": True,
+        },
+    )
     assert packages.package_bytes(package) == original_zip
     assert package.items.get(document_id=ids[0]).metadata["period"] == "2026-10"
 
@@ -57,8 +74,18 @@ def test_supplements_and_open_points(user, actor, companies):
     p = packages.create_package(actor, c.id, ["2026-10"], "v1")
     assert packages.package_preview(actor, c.id, ["2026-10"], p["id"])["count"] == 0
     d = Document.objects.filter(company=c, kind="receipt").first()
-    services.save_result(actor, {"document_id": str(d.id), "base_version": d.version, "company_id": c.id,
-        "kind": "receipt", "period": "2026-10", "metadata": {"note": "Korrigierte Zuordnung"}, "approve": True})
+    services.save_result(
+        actor,
+        {
+            "document_id": str(d.id),
+            "base_version": d.version,
+            "company_id": c.id,
+            "kind": "receipt",
+            "period": "2026-10",
+            "metadata": {"note": "Korrigierte Zuordnung"},
+            "approve": True,
+        },
+    )
     supplement = packages.create_package(actor, c.id, ["2026-10"], "supplement", p["id"])
     assert len(supplement["items"]) == 1
     assert packages.package_preview(actor, c.id, ["2026-10"], supplement["id"])["count"] == 0
@@ -128,12 +155,14 @@ def test_imap_restart_uidvalidity_and_provenance(actor, companies):
     job = Job.objects.create(company=c, actor_id=actor.user_id, kind="imap", idempotency_key="imap")
     actual_ingest = services.ingest
     count = 0
+
     def crash_on_second(*args, **kwargs):
         nonlocal count
         count += 1
         if count == 2:
             raise RuntimeError("worker restart")
         return actual_ingest(*args, **kwargs)
+
     with patch("accounting.mail.ingest", side_effect=crash_on_second):
         with pytest.raises(RuntimeError):
             mail.scan_mailbox(job, connector=FakeIMAP)
@@ -161,7 +190,9 @@ def test_imap_alias_unknown_and_unsupported_preserved(actor, companies):
     assert Document.objects.filter(company__isnull=True).count() == 2
     msg = EmailMessage()
     msg.set_content("Unsupported")
-    msg.add_attachment(b"unsupported original", maintype="application", subtype="octet-stream", filename="bad.exe")
+    msg.add_attachment(
+        b"unsupported original", maintype="application", subtype="octet-stream", filename="bad.exe"
+    )
     mail.import_message(actor, m, "1", "2", msg.as_bytes())
     rejected = ImportSource.objects.exclude(error="").get()
     assert storage.path(rejected.provenance["preserved_path"]).read_bytes() == b"unsupported original"
@@ -199,7 +230,10 @@ def test_smtp_unknown_never_automatically_retried(user, actor, companies):
     p, _ = create_ready_package(user, actor, companies[0])
     d = mail.queue_dispatch(actor, p["id"], "unknown")
     job = Job.objects.get(kind="dispatch")
-    with patch("django.core.mail.backends.locmem.EmailBackend.send_messages", side_effect=smtplib.SMTPServerDisconnected("lost after DATA")):
+    with patch(
+        "django.core.mail.backends.locmem.EmailBackend.send_messages",
+        side_effect=smtplib.SMTPServerDisconnected("lost after DATA"),
+    ):
         result = jobs.run_job(job.id)
     assert result["status"] == "done"
     assert Dispatch.objects.get(id=d["id"]).status == "unknown"
@@ -238,7 +272,9 @@ def test_multipart_roundtrip_and_message_size(user, actor, companies):
 
 
 def test_mail_passwords_never_returned(actor, companies):
-    response = mail.mail_config(actor, companies[0].id, {"imap_password": "private-secret", "smtp_password": "another-secret"})
+    response = mail.mail_config(
+        actor, companies[0].id, {"imap_password": "private-secret", "smtp_password": "another-secret"}
+    )
     assert "imap_password" not in response and response["imap_password_set"]
     mailbox = Mailbox.objects.get(company=companies[0])
     assert "private-secret" not in mailbox.imap_password

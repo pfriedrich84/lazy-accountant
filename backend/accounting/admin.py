@@ -30,7 +30,15 @@ class ImmutableAdmin(admin.ModelAdmin):
         return False
 
 
-for model in (models.Package, models.PackageItem, models.Revision, models.ImportSource, models.SendAttempt, models.Document, models.FileOperation):
+for model in (
+    models.Package,
+    models.PackageItem,
+    models.Revision,
+    models.ImportSource,
+    models.SendAttempt,
+    models.Document,
+    models.FileOperation,
+):
     admin.site.register(model, ImmutableAdmin)
 for model in (models.Company, models.Membership, models.Account, models.Category):
     admin.site.register(model)

@@ -11,7 +11,11 @@ class Command(BaseCommand):
     help = "Originale, physische Zuordnungen, Paket-Snapshots, Mailteile und erhaltene Fehleranhänge prüfen."
 
     def add_arguments(self, parser):
-        parser.add_argument("--repair", action="store_true", help="Nur ausstehende journalisierte Ablageoperationen erneut ausführen.")
+        parser.add_argument(
+            "--repair",
+            action="store_true",
+            help="Nur ausstehende journalisierte Ablageoperationen erneut ausführen.",
+        )
 
     def handle(self, *args, **options):
         if options["repair"]:
@@ -26,7 +30,10 @@ class Command(BaseCommand):
                     raise ValueError("Abweichende Originalbytes in Monats-/Eingangsablage")
                 if doc.company_id and doc.period:
                     year, month = doc.period.split("-")
-                    if not all(storage.path(f"{doc.company.folder}/{year}/{month}/{f}").is_dir() for f in storage.FOLDERS):
+                    if not all(
+                        storage.path(f"{doc.company.folder}/{year}/{month}/{f}").is_dir()
+                        for f in storage.FOLDERS
+                    ):
                         raise ValueError("Monatsordner unvollständig")
             except Exception as e:
                 errors.append(f"Dokument {doc.id}: {e}")
@@ -51,7 +58,10 @@ class Command(BaseCommand):
         for source in ImportSource.objects.exclude(error="").iterator():
             if source.provenance.get("preserved_path"):
                 try:
-                    if storage.checksum(storage.path(source.provenance["preserved_path"]).read_bytes()) != source.provenance["sha256"]:
+                    if (
+                        storage.checksum(storage.path(source.provenance["preserved_path"]).read_bytes())
+                        != source.provenance["sha256"]
+                    ):
                         raise ValueError("Prüfsumme falsch")
                 except Exception as e:
                     errors.append(f"Fehleranhang {source.id}: {e}")
@@ -59,4 +69,6 @@ class Command(BaseCommand):
             errors.append("Es gibt ausstehende Dateioperationen.")
         if errors:
             raise CommandError("Integritätsprüfung fehlgeschlagen:\n" + "\n".join(errors))
-        self.stdout.write(f"Integrität OK: {Document.objects.count()} Dokumente, {Package.objects.count()} Pakete, {Dispatch.objects.count()} Versandaufträge.")
+        self.stdout.write(
+            f"Integrität OK: {Document.objects.count()} Dokumente, {Package.objects.count()} Pakete, {Dispatch.objects.count()} Versandaufträge."
+        )

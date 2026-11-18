@@ -3,6 +3,7 @@
 The database commits desired state first. Reconciliation can be repeated after any
 interruption; the immutable original remains the source of truth throughout.
 """
+
 import hashlib
 import os
 import re
@@ -15,9 +16,16 @@ from .auth import DomainError
 from .models import Document, FileOperation
 
 FOLDERS = ("ER", "AR", "Bankkonto", "Wertpapiere")
-KIND_FOLDER = {"incoming_invoice": "ER", "incoming_credit": "ER", "receipt": "ER",
-               "outgoing_invoice": "AR", "outgoing_cancellation": "AR", "bank_pdf": "Bankkonto",
-               "bank_camt": "Bankkonto", "security_pdf": "Wertpapiere"}
+KIND_FOLDER = {
+    "incoming_invoice": "ER",
+    "incoming_credit": "ER",
+    "receipt": "ER",
+    "outgoing_invoice": "AR",
+    "outgoing_cancellation": "AR",
+    "bank_pdf": "Bankkonto",
+    "bank_camt": "Bankkonto",
+    "security_pdf": "Wertpapiere",
+}
 
 
 def path(relative):
@@ -80,7 +88,9 @@ def desired_path(doc):
 
 
 def journal(doc):
-    return FileOperation.objects.create(document=doc, version=doc.version, old_path=doc.filed_path, new_path=desired_path(doc))
+    return FileOperation.objects.create(
+        document=doc, version=doc.version, old_path=doc.filed_path, new_path=desired_path(doc)
+    )
 
 
 def reconcile(document_id=None):
@@ -91,7 +101,11 @@ def reconcile(document_id=None):
         try:
             with transaction.atomic():
                 op = FileOperation.objects.get(id=op_id)
-                doc = Document.objects.select_for_update(of=("self",)).select_related("company").get(id=op.document_id)
+                doc = (
+                    Document.objects.select_for_update(of=("self",))
+                    .select_related("company")
+                    .get(id=op.document_id)
+                )
                 if op.status != "pending":
                     continue
                 if op.version != doc.version:
@@ -104,7 +118,11 @@ def reconcile(document_id=None):
                 atomic_write(op.new_path, data, doc.sha256)
                 # Clean obsolete journal targets too: a crash may have published an earlier target
                 # before its transaction was committed.
-                old_paths = set(FileOperation.objects.filter(document=doc).exclude(new_path=op.new_path).values_list("new_path", flat=True))
+                old_paths = set(
+                    FileOperation.objects.filter(document=doc)
+                    .exclude(new_path=op.new_path)
+                    .values_list("new_path", flat=True)
+                )
                 old_paths.add(doc.filed_path)
                 for old in old_paths:
                     if old and old not in {op.new_path, doc.original_path}:

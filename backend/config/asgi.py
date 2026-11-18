@@ -29,15 +29,21 @@ class MCPAuthentication:
             try:
                 if not auth.startswith("Bearer "):
                     raise DomainError("Bearer-Token erforderlich.", 401)
+
                 def authenticate_token():
                     close_old_connections()
                     try:
                         return token_actor(auth[7:])
                     finally:
                         close_old_connections()
+
                 await sync_to_async(authenticate_token, thread_sensitive=True)()
             except DomainError:
-                response = JSONResponse({"error": "Authentifizierung erforderlich."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+                response = JSONResponse(
+                    {"error": "Authentifizierung erforderlich."},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
                 await response(scope, receive, send)
                 return
         await self.app(scope, receive, send)
@@ -50,8 +56,11 @@ async def lifespan(app):
         yield
 
 
-application = Starlette(routes=[
-    Mount("/mcp", app=MCPAuthentication(http_app)),
-    Mount("/static", app=StaticFiles(directory=settings.STATIC_ROOT, check_dir=False)),
-    Mount("/", app=django_app),
-], lifespan=lifespan)
+application = Starlette(
+    routes=[
+        Mount("/mcp", app=MCPAuthentication(http_app)),
+        Mount("/static", app=StaticFiles(directory=settings.STATIC_ROOT, check_dir=False)),
+        Mount("/", app=django_app),
+    ],
+    lifespan=lifespan,
+)

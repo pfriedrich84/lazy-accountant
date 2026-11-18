@@ -4,20 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounting', '0002_processingclaim_uploadticket'),
+        ("accounting", "0002_processingclaim_uploadticket"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='company',
-            name='recipients',
+            model_name="company",
+            name="recipients",
             field=models.JSONField(blank=True, default=list),
         ),
         migrations.AlterField(
-            model_name='mailbox',
-            name='aliases',
+            model_name="mailbox",
+            name="aliases",
             field=models.JSONField(blank=True, default=list),
         ),
     ]

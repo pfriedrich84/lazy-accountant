@@ -78,19 +78,31 @@ class Mailbox(models.Model):
     smtp_port = models.PositiveIntegerField(default=587)
     smtp_user = models.CharField(max_length=255, blank=True)
     smtp_password = models.TextField(blank=True)
-    smtp_security = models.CharField(max_length=10, default="starttls", choices=[("none", "Keine"), ("starttls", "STARTTLS"), ("ssl", "TLS")])
+    smtp_security = models.CharField(
+        max_length=10,
+        default="starttls",
+        choices=[("none", "Keine"), ("starttls", "STARTTLS"), ("ssl", "TLS")],
+    )
     sender = models.EmailField(blank=True)
     reply_to = models.EmailField(blank=True)
     max_message_bytes = models.PositiveIntegerField(default=18 * 1024 * 1024)
-    subject_template = models.CharField(max_length=200, default="Unterlagen {company} – {period} – Paket {version}")
-    body_template = models.TextField(default="Guten Tag,\n\nanbei die Unterlagen für {company}, {period}.\n{notes}\n")
+    subject_template = models.CharField(
+        max_length=200, default="Unterlagen {company} – {period} – Paket {version}"
+    )
+    body_template = models.TextField(
+        default="Guten Tag,\n\nanbei die Unterlagen für {company}, {period}.\n{notes}\n"
+    )
 
 
 KINDS = [
-    ("incoming_invoice", "Eingangsrechnung"), ("incoming_credit", "Eingangsgutschrift"),
-    ("receipt", "Sonstiger Beleg"), ("outgoing_invoice", "Ausgangsrechnung"),
-    ("outgoing_cancellation", "Ausgangsstorno"), ("bank_pdf", "Kontoauszug PDF"),
-    ("bank_camt", "Kontoauszug CAMT"), ("security_pdf", "Wertpapierunterlage"),
+    ("incoming_invoice", "Eingangsrechnung"),
+    ("incoming_credit", "Eingangsgutschrift"),
+    ("receipt", "Sonstiger Beleg"),
+    ("outgoing_invoice", "Ausgangsrechnung"),
+    ("outgoing_cancellation", "Ausgangsstorno"),
+    ("bank_pdf", "Kontoauszug PDF"),
+    ("bank_camt", "Kontoauszug CAMT"),
+    ("security_pdf", "Wertpapierunterlage"),
 ]
 
 
@@ -110,7 +122,9 @@ class Document(models.Model):
     category = models.ForeignKey(Category, null=True, blank=True, on_delete=models.PROTECT)
     metadata = models.JSONField(default=dict)
     issues = models.JSONField(default=list)
-    status = models.CharField(max_length=20, default="new", choices=[("new", "Neu"), ("review", "Prüfen"), ("ready", "Geprüft")])
+    status = models.CharField(
+        max_length=20, default="new", choices=[("new", "Neu"), ("review", "Prüfen"), ("ready", "Geprüft")]
+    )
     version = models.PositiveIntegerField(default=1)
     parser_result = models.JSONField(default=dict)
     parser_error = models.TextField(blank=True)
@@ -134,7 +148,9 @@ class Revision(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["document", "version"], name="unique_document_revision")]
+        constraints = [
+            models.UniqueConstraint(fields=["document", "version"], name="unique_document_revision")
+        ]
 
 
 class FileOperation(models.Model):
@@ -148,7 +164,9 @@ class FileOperation(models.Model):
 
 
 class ImportSource(models.Model):
-    document = models.ForeignKey(Document, null=True, blank=True, on_delete=models.PROTECT, related_name="sources")
+    document = models.ForeignKey(
+        Document, null=True, blank=True, on_delete=models.PROTECT, related_name="sources"
+    )
     mailbox = models.ForeignKey(Mailbox, null=True, on_delete=models.PROTECT)
     identity = models.CharField(max_length=64, unique=True)
     stable_identity = models.CharField(max_length=64, db_index=True)
@@ -173,7 +191,9 @@ class Job(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["company", "kind", "idempotency_key"], name="unique_job_key")]
+        constraints = [
+            models.UniqueConstraint(fields=["company", "kind", "idempotency_key"], name="unique_job_key")
+        ]
 
 
 class Package(models.Model):
@@ -191,8 +211,10 @@ class Package(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["company", "version"], name="unique_package_version"),
-                       models.UniqueConstraint(fields=["company", "idempotency_key"], name="unique_package_key")]
+        constraints = [
+            models.UniqueConstraint(fields=["company", "version"], name="unique_package_version"),
+            models.UniqueConstraint(fields=["company", "idempotency_key"], name="unique_package_key"),
+        ]
 
 
 class PackageItem(models.Model):
@@ -217,7 +239,9 @@ class Dispatch(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["package", "idempotency_key"], name="unique_dispatch_key")]
+        constraints = [
+            models.UniqueConstraint(fields=["package", "idempotency_key"], name="unique_dispatch_key")
+        ]
 
 
 class SendAttempt(models.Model):
@@ -258,4 +282,6 @@ class IdempotencyRecord(models.Model):
     result = models.JSONField()
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["actor", "operation", "key"], name="unique_idempotency")]
+        constraints = [
+            models.UniqueConstraint(fields=["actor", "operation", "key"], name="unique_idempotency")
+        ]
