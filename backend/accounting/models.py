@@ -125,6 +125,16 @@ class Document(models.Model):
     status = models.CharField(
         max_length=20, default="new", choices=[("new", "Neu"), ("review", "Prüfen"), ("ready", "Geprüft")]
     )
+    is_excluded = models.BooleanField(default=False, db_index=True)
+    exclusion_reason = models.CharField(max_length=1000, blank=True)
+    excluded_at = models.DateTimeField(null=True, blank=True)
+    excluded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="excluded_documents",
+    )
     version = models.PositiveIntegerField(default=1)
     parser_result = models.JSONField(default=dict)
     parser_error = models.TextField(blank=True)
@@ -138,6 +148,21 @@ class Document(models.Model):
     class Meta:
         ordering = ["created_at", "id"]
         indexes = [models.Index(fields=["company", "period", "status"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(is_excluded=True, excluded_at__isnull=False, excluded_by__isnull=False)
+                    & ~models.Q(exclusion_reason="")
+                )
+                | models.Q(
+                    is_excluded=False,
+                    excluded_at__isnull=True,
+                    excluded_by__isnull=True,
+                    exclusion_reason="",
+                ),
+                name="document_exclusion_details",
+            )
+        ]
 
 
 class Revision(models.Model):
@@ -146,6 +171,7 @@ class Revision(models.Model):
     base_version = models.PositiveIntegerField()
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     source = models.CharField(max_length=100)
+    reason = models.CharField(max_length=1000, blank=True)
     snapshot = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
 
