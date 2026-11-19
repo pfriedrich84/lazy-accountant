@@ -3,7 +3,7 @@ name: lazy-accountant
 x-app: &app
   build: .
   image: lazy-accountant:0.1.0
-  user: "${APP_UID:-1000}:${APP_GID:-1000}"
+  user: "1000:1000"
   environment: &environment
     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Run scripts/init-env.py first}
     ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
@@ -22,11 +22,7 @@ x-app: &app
     MAX_FILE_BYTES: "${MAX_FILE_BYTES:-26214400}"
     MAX_PACKAGE_BYTES: "${MAX_PACKAGE_BYTES:-268435456}"
   volumes:
-    - type: bind
-      source: ${DOCUMENTS_ROOT:-./var/documents}
-      target: /data
-      bind:
-        create_host_path: false
+    - documents:/data
   restart: unless-stopped
   init: true
   stop_grace_period: 6m
@@ -50,7 +46,7 @@ services:
   app:
     <<: *app
     ports:
-      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8000}:8000"
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -87,3 +83,4 @@ services:
 
 volumes:
   postgres:
+  documents:

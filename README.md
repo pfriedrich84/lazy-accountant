@@ -6,7 +6,7 @@ Django/DRF + PostgreSQL · React/TypeScript mit React Router Framework-SPA, Mate
 
 ## Start mit Docker Compose
 
-Voraussetzung: Docker Engine mit Compose-Plugin und Python 3 zum einmaligen Erzeugen der Konfiguration. Der Datenbankport wird nicht veröffentlicht. HTTP ist zunächst nur an Loopback gebunden.
+Voraussetzung: Docker Engine mit Compose-Plugin und Python 3 zum einmaligen Erzeugen der Konfiguration. Docker legt die benannten Volumes für PostgreSQL und Dokumente selbst an; kein Host-Ablageordner ist nötig. Der Web-/API-/MCP-Port **8000 wird am Host veröffentlicht** (`0.0.0.0:8000`); der Datenbankport bleibt intern.
 
 ```sh
 python3 scripts/init-env.py
@@ -14,18 +14,22 @@ python3 scripts/init-env.py
 docker compose up --build -d --wait
 ```
 
-Oberfläche: **http://localhost:8000/** · Benutzer `admin`, Passwort aus `.env`. Django Admin zusätzlich unter `/admin/`. Zugangsdaten nie in Git/Chat/Buildprotokolle kopieren. `init-env.py` überschreibt keine bestehende Konfiguration und legt den Host-Ablageordner mit privaten Rechten an.
+Oberfläche: **http://localhost:8000/** · Benutzer `admin`, Passwort aus `.env`. Django Admin zusätzlich unter `/admin/`. Zugangsdaten nie in Git/Chat/Buildprotokolle kopieren. `init-env.py` überschreibt keine bestehende Konfiguration und erzeugt nur die private `.env`. App und Worker teilen das Dokumentvolume unter `/data` und laufen als Benutzer `1000:1000`; Docker übernimmt beim erstmaligen Anlegen dessen private Verzeichnisrechte aus dem Image.
 
 Der Start führt Migrationen und Bootstrap idempotent aus. App und separater Worker verwenden dieselbe Codebasis; PostgreSQL ist die persistente Queue. Firmen, Konten/Depots, Kategorien, Empfänger, Mailzugänge und Agententoken sind über **Einstellungen** konfigurierbar.
 
-Für das private LAN `HTTP_BIND`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MCP_ALLOWED_HOSTS` und `MCP_ALLOWED_ORIGINS` in `.env` **explizit** um die interne Adresse ergänzen. Kein öffentlicher Betrieb über unverschlüsseltes HTTP. Domain/TLS sind für den vereinbarten internen Start nicht erforderlich.
+Für das private LAN `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MCP_ALLOWED_HOSTS` und `MCP_ALLOWED_ORIGINS` in `.env` **explizit** um die tatsächliche interne Server-IP oder den Hostnamen ergänzen, einschließlich Port bei den Origins/MCP-Hosts. Die Veröffentlichung des Ports hebt die Host-/Origin-Prüfung nicht auf. `HTTP_PORT` ändert den Host-Port, `HTTP_BIND=127.0.0.1` beschränkt ihn wieder auf lokalen Zugriff. Bestehende `.env` mit `HTTP_BIND=127.0.0.1` für LAN-Zugriff bewusst auf `0.0.0.0` oder die interne Server-IP ändern. Kein öffentlicher Betrieb über unverschlüsseltes HTTP; Firewall/private Netzgrenze beachten. Domain/TLS sind für den vereinbarten internen Start nicht erforderlich.
+
+### Dockhand
+
+Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel deployen; beim Update erneut bauen. Die privaten Konfigurationswerte aus `.env` in Dockhand übernehmen (alternativ `.env.example` mit frisch erzeugten starken Secrets ausfüllen). Kein `DOCUMENTS_ROOT`, kein Host-`chown` und keine Anpassung an die Benutzer-ID des Docker-Hosts nötig. Docker erzeugt die Volumes `documents` und `postgres` mit dem Stack-Projektpräfix. Für einen späteren Netzwerkspeicher nur die Definition des Dokumentvolumes ändern, nicht den Anwendungspfad `/data`; vorhandene Daten vorher konsistent migrieren, siehe [Betrieb](docs/OPERATIONS.md#dokumentvolume-und-späterer-netzwerkspeicher).
 
 ## Erster Ablauf
 
 1. Firma anlegen, sicheren eindeutigen Ordnernamen wählen; Konto/Depot, Kategorien und Steuerberater-Empfänger hinterlegen.
 2. PDFs, JPG/PNG und CAMT-XML im **Dokumenteingang** hochladen. Ungeklärte Firma bleibt im persönlichen Eingang. Der Import rät keinen endgültigen Übergabemonat.
 3. Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben. Quartals-/Mehrmonatsauszüge behalten ihren echten Zeitraum; die Zuordnung zu einem Übergabemonat ausdrücklich mit Begründung bestätigen.
-4. Unter **Monatsablage** die echte Hoststruktur prüfen. Alle vier Unterordner bleiben erhalten:
+4. Unter **Monatsablage** die echte Ordnerstruktur im Dokumentvolume prüfen. Alle vier Unterordner bleiben erhalten:
 
    ```text
    Firma/Jahr/Monat/ER/
@@ -54,7 +58,7 @@ docker compose exec app python backend/manage.py bootstrap \
 # Optional: mit --classified die synthetischen Metadaten bereits freigeben.
 ```
 
-Zwei getrennte Firmen mit **je acht Dokumenten**, Bankkonto/Depot, Kategorien sowie AR, ER, Gutschrift, Storno, CAMT + Auszugs-PDF, Wertpapier-PDF und Scanbeleg. Wiederholtes Bootstrap erzeugt keine Dubletten. Unter `DOCUMENTS_ROOT/samples/` liegen zusätzlich die Uploaddateien der ersten Firma, im Unterordner `Zweite-Firma/` diejenigen der zweiten Firma.
+Zwei getrennte Firmen mit **je acht Dokumenten**, Bankkonto/Depot, Kategorien sowie AR, ER, Gutschrift, Storno, CAMT + Auszugs-PDF, Wertpapier-PDF und Scanbeleg. Wiederholtes Bootstrap erzeugt keine Dubletten. Im Dokumentvolume unter `/data/samples/` liegen zusätzlich die Uploaddateien der ersten Firma, im Unterordner `Zweite-Firma/` diejenigen der zweiten Firma. Bei Bedarf auf den Host kopieren: `docker compose cp app:/data/samples/. ./var/samples/` (Zielordner vorher anlegen).
 
 Ein vollständig automatisierter, **echter MCP-/IMAP-/SMTP-Test** benötigt nur das mitgelieferte kontrollierte Mail-Testprofil, keine produktiven Mailzugänge:
 
