@@ -100,5 +100,20 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
     "Wiederherstellung prüfen",
   );
   await expect(page.getByText("3 offene Prüfpunkte")).toBeVisible();
+  // Restore is intentionally not an approval. Leave only this test's synthetic
+  // image excluded, otherwise a later real worker/mail smoke correctly blocks
+  // on the still-unassigned active inbox document after backup/restore.
+  await page
+    .getByRole("button", { name: "Als Nichtbeleg ausschließen", exact: true })
+    .click();
+  await dialog
+    .getByLabel("Begründung")
+    .fill("Testbereinigung: synthetische Signaturgrafik");
+  await dialog
+    .getByRole("button", { name: "Als Nichtbeleg ausschließen", exact: true })
+    .click();
+  await expect(
+    page.getByText("Als Nichtbeleg ausgeschlossen", { exact: true }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
