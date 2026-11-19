@@ -4,6 +4,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
 });
+describe("Idempotenzschlüssel auf LAN-HTTP", () => {
+  it("verwendet randomUUID, wenn die sichere Kontext-API verfügbar ist", async () => {
+    const randomUUID = vi.fn(() => "12345678-1234-4234-8234-123456789abc");
+    vi.stubGlobal("crypto", { randomUUID });
+    const { idempotencyKey } = await import("../app/api");
+    expect(idempotencyKey()).toBe("12345678-1234-4234-8234-123456789abc");
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+  it("erzeugt ohne randomUUID eine kryptografische UUID v4 mit korrekten Variantenbits", async () => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(255));
+    vi.stubGlobal("crypto", { getRandomValues });
+    const { idempotencyKey } = await import("../app/api");
+    expect(idempotencyKey()).toBe("ffffffff-ffff-4fff-bfff-ffffffffffff");
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(getRandomValues.mock.calls[0][0]).toHaveLength(16);
+  });
+  it("verwendet bei fehlender Kryptografie keine unsicheren Zufallszahlen", async () => {
+    vi.stubGlobal("crypto", undefined);
+    const { idempotencyKey } = await import("../app/api");
+    expect(() => idempotencyKey()).toThrow("keine sichere Zufallsquelle");
+  });
+});
 describe("gemeinsamer API-Client", () => {
   it("sendet CSRF und lässt Multipart-Grenzen vom Browser setzen", async () => {
     const fetch = vi

@@ -1,6 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 
+// localhost is a secure context even on HTTP: reproduce the API missing on LAN HTTP.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, "randomUUID", {
+      value: undefined,
+      configurable: true,
+    });
+  });
+});
+
 async function navigate(page: Page, title: string) {
   const item = page.getByRole("link", { name: title, exact: true });
   if (!(await item.first().isVisible()))
@@ -13,6 +23,9 @@ async function navigate(page: Page, title: string) {
 
 async function login(page: Page) {
   await page.goto("/");
+  expect(await page.evaluate(() => typeof window.crypto.randomUUID)).toBe(
+    "undefined",
+  );
   await page
     .getByLabel("Benutzername")
     .fill(process.env.ADMIN_USERNAME || "admin");
