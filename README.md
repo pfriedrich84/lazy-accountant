@@ -6,12 +6,12 @@ Django/DRF + PostgreSQL · React/TypeScript mit React Router Framework-SPA, Mate
 
 ## Start mit Docker Compose
 
-Voraussetzung: Docker Engine mit Compose-Plugin und Python 3 zum einmaligen Erzeugen der Konfiguration. Docker legt die benannten Volumes für PostgreSQL und Dokumente selbst an; kein Host-Ablageordner ist nötig. Der Web-/API-/MCP-Port **8000 wird am Host veröffentlicht** (`0.0.0.0:8000`); der Datenbankport bleibt intern.
+Voraussetzung: Docker Engine mit Compose-Plugin und Python 3 zum einmaligen Erzeugen der Konfiguration. Docker legt die benannten Volumes für PostgreSQL und Dokumente selbst an; kein Host-Ablageordner ist nötig. Der Web-/API-/MCP-Port **8000 wird am Host veröffentlicht** (`0.0.0.0:8000`); Datenbank- und ClamAV-Port bleiben intern. ClamAV benötigt zusätzlich bis zu 3 GiB RAM; mindestens etwa 6 GiB für den Stack vorsehen.
 
 ```sh
 python3 scripts/init-env.py
 # .env lokal prüfen. ADMIN_PASSWORD steht ausschließlich dort.
-docker compose up --build -d --wait
+docker compose up --build -d --wait --wait-timeout 900
 ```
 
 Oberfläche: **http://localhost:8000/** · Benutzer `admin`, Passwort aus `.env`. Django Admin zusätzlich unter `/admin/`. Zugangsdaten nie in Git/Chat/Buildprotokolle kopieren. `init-env.py` überschreibt keine bestehende Konfiguration und erzeugt nur die private `.env`. App und Worker teilen das Dokumentvolume unter `/data` und laufen als Benutzer `1000:1000`; Docker übernimmt beim erstmaligen Anlegen dessen private Verzeichnisrechte aus dem Image.
@@ -27,7 +27,7 @@ Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel 
 ## Erster Ablauf
 
 1. Firma anlegen, sicheren eindeutigen Ordnernamen wählen; Konto/Depot, Kategorien und Steuerberater-Empfänger hinterlegen.
-2. PDFs, JPG/PNG und CAMT-XML im **Dokumenteingang** hochladen. Ungeklärte Firma bleibt im persönlichen Eingang. Der Import rät keinen endgültigen Übergabemonat.
+2. PDFs, JPG/PNG und CAMT-XML im **Dokumenteingang** hochladen. Sie bleiben zunächst in privater Quarantäne; erst ein erfolgreicher lokaler ClamAV-Hintergrundscan schaltet Original, Vorschau, Parser und Bearbeitung frei. Fund, Scanfehler oder veraltete Signaturen bleiben sichtbar gesperrt. Ungeklärte Firma bleibt im persönlichen Eingang. Der Import rät keinen endgültigen Übergabemonat.
 3. Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben. Quartals-/Mehrmonatsauszüge behalten ihren echten Zeitraum; die Zuordnung zu einem Übergabemonat ausdrücklich mit Begründung bestätigen.
 4. Unter **Monatsablage** die echte Ordnerstruktur im Dokumentvolume prüfen. Alle vier Unterordner bleiben erhalten:
 
@@ -133,6 +133,8 @@ ADMIN_PASSWORD='<lokales Passwort>' npm run test:browser
 ```
 
 ## Betrieb, Datensicherheit und Grenzen
+
+- **[Malwareprüfung und Quarantäne](docs/SECURITY.md)**: gemeinsamer REST-/MCP-/IMAP-Import, gepinntes lokales ClamAV 1.5.5, sichere Fehlerzustände, erneute Prüfung, Paket-/Versandsperren, Ressourcen/Signaturupdates und Aufbewahrungsregeln. Keine externen Scandienste, kein Fallback ohne Scanner. Beim Upgrade alte App/Worker stoppen: alle vorhandenen Originale ohne vertrauenswürdigen Scannachweis werden neu geprüft. Malwareprüfung ist keine Sicherheitsgarantie.
 
 - **[Betrieb und Backup/Restore](docs/OPERATIONS.md)**: gemeinsame Offline-Sicherung von PostgreSQL, Originalen, Snapshots, Mailteilen und Schlüssel; Integritätsprüfung und sicherer Wiederanlauf.
 - **[CAMT-Unterstützung](docs/CAMT.md)**: explizite Namespaces, sichere XML-Verarbeitung und sichtbare Fehler ohne Originalverlust.

@@ -2,6 +2,21 @@
 
 Beginn: 2026-11-18 (UTC). Branch: `pfriedrich84/mvp-implementieren-dokumentablage-imap-smtp-mcp`.
 
+## Ergänzung 2026-11-19 – Issue #12: ClamAV/Quarantäne
+
+Implementiert: gemeinsamer Quarantäneimport für REST/MCP/IMAP, unabhängiger Sicherheitsstatus und Scan-Audit, atomare hashgebundene Freigabe, wiederaufnehmbare begrenzte Scanversuche, gesperrte Datei-/Parser-/Claim-/Ergebnis-/Paket-/Versandpfade, UI/REST/MCP-Status, Restore-/Upgradeprüfung und gepinntes internes ClamAV. Betriebsvertrag und Grenzen: [SECURITY.md](SECURITY.md).
+
+Tatsächlich in dieser Session ausgeführt:
+
+- Ruff Check/Format, Django-Systemcheck und `makemigrations --check --dry-run`: erfolgreich.
+- Backend: **125 Tests erfolgreich, 3 übersprungen** (zwei optionale echte ClamAV-Tests separat ausgeführt; ein bestehender optionaler Umgebungstest).
+- Offizielles natives **ClamAV 1.5.5**, außerhalb des Repositories entpackt, offizielle Signaturen mit freshclam geladen; Engine `1.5.5/28188`. **2 echte Integrationstests erfolgreich**: INSTREAM, harmlose PDF/Bild/CAMT, ungefährliches EICAR über REST, tatsächlichen MCP-Transport und IMAP, verschlüsselte PDF und Stream-/Rekursions-/Dateianzahllimits. Produktions-Konfigurationsoptionen mit diesem clamd geparst.
+- Frontend: Typecheck, **8 Vitest-Tests** und Produktionsbuild erfolgreich.
+- Native Browserprüfung gegen ASGI + echtem ClamAV, für SQLite bewusst `Q_SYNC=1`: **5 Playwright-Tests erfolgreich, 1 bereits absichtlich übersprungener mobiler Vollmonatslauf**. Desktop/Mobil einschließlich EICAR-Anzeige und verweigerten Original-/Text-/Seitenendpunkten, Upload/Prüfung/Paket und zwei vollständigen Firmenmonaten.
+- Ein vorheriger nativer Versuch mit parallelem Q2/SQLite zeigte SQLite-Schreibsperren (kein Produktionsbackend); deshalb nicht als erfolgreiche asynchrone Produktionsabnahme gewertet. Deferred-States/Lease-/Retry-/Neustartfälle sind eigenständig durch Service-Tests geprüft.
+
+**Noch nicht lokal ausgeführt:** Docker/Compose und PostgreSQL stehen in dieser Umgebung nicht zur Verfügung. Die CI ist um echte ClamAV-Integration mit Produktionskonfiguration sowie Compose-Netz-/Mount-/INSTREAM-Smoke erweitert; ihr Lauf und der Compose-/PostgreSQL-/Restore-Gesamtlauf werden hier nicht als bereits bestanden behauptet. Keine echte Malware und keine produktiven Zugangsdaten verwendet.
+
 ## Auftrag und Arbeitsweise
 
 Etappe 1 aus `PLAN.md` vollständig implementieren; spätere Etappen nicht vorziehen. Keine produktiven Zugangsdaten erforderlich. Technische Entscheidungen autonom im vereinbarten Stack. Kleine nachvollziehbare Commits nach Meilensteinen, bei längeren Schritten ungefähr stündlich; Push auf den Arbeitsbranch.

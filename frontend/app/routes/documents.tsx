@@ -9,6 +9,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   MenuItem,
   Paper,
   Stack,
@@ -62,6 +63,7 @@ export default function Documents() {
   const list = useInfiniteQuery({
     queryKey: ["document-list", filters.toString()],
     initialPageParam: "",
+    refetchInterval: 5000,
     queryFn: ({ pageParam }) =>
       api<Page>(`documents/?${filters}&cursor=${pageParam}`),
     getNextPageParam: (p) => p.next_cursor || undefined,
@@ -303,6 +305,13 @@ export default function Documents() {
                     <TableCell>{d.period || "—"}</TableCell>
                     <TableCell>
                       <Status status={d.status} />
+                      <Chip
+                        size="small"
+                        label={`Sicherheit: ${d.security_status}`}
+                        color={
+                          d.security_status === "clean" ? "success" : "warning"
+                        }
+                      />
                     </TableCell>
                     <TableCell align="right">{bytes(d.size)}</TableCell>
                   </TableRow>

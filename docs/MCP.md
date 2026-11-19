@@ -4,6 +4,12 @@
 
 Die Postfach-Checkbox `enabled` steuert **nur die automatische nächtliche Abholung**. Ohne Haken startet kein Nachtabruf; wartende automatische Aufträge werden beim Ausführen übersprungen. Ein ausdrücklicher `start_imap_import`-Aufruf mit `process`-Berechtigung ist auch bei ausgeschalteter Automatik erlaubt, ebenso der UI-Knopf „IMAP jetzt abrufen“. Manuelle Abrufe und das Fortsetzen manueller Aufträge setzen den Haken nicht. IMAP-Zugang und Importbeginn müssen weiterhin korrekt eingerichtet sein.
 
+## Sicherheitsstatus und asynchroner Import
+
+`complete_upload` und erfolgreiche IMAP-Übernahme bedeuten **dauerhafte Quarantäne**, nicht sofortige Dateifreigabe. `get_document`/`list_documents` liefern `security_status` (`pending`, `scanning`, `clean`, `infected`, `error`), `security_error`, Scanzeitpunkt und Hash. Nur `clean` erlaubt Claims, Auslese, Original-/Seitenzugriff und Ergebnisübernahme. Bei wartenden Scans begrenzt erneut abfragen; Fehler/Funde sichtbar berichten, nicht durch `approve` oder Dubletten umgehen. `get_file_access` gibt bei Sperre keine Download-URLs aus. Direkte REST-Dateizugriffe antworten trotzdem unabhängig davon mit 423.
+
+`rescan_document(document_id)` benötigt `process`, setzt eine neue tatsächliche Prüfung in Gang und hält die Sperre bis zum Erfolg aufrecht. Keine Malware-Ausnahmefreigabe. Details enthalten `scans` und `security_impact` mit betroffenen Paket-/Versand-IDs. Paketvorschau liefert `security_blocked` sowie gesperrte IMAP-Fälle unter `blocked_imports`; Paketdetails dynamische `security_blocked`. Spätere Funde sperren unveränderte alte Snapshots gegen Download und weiteren Versand. [Betrieb und Grenzen](SECURITY.md).
+
 ## Transport und Authentifizierung
 
 Offizielles `modelcontextprotocol/python-sdk` **2.3.0**, `MCPServer`, Streamable HTTP, ASGI-Mount **`/mcp/`**. Der übergeordnete ASGI-Lifecycle startet/beendet `server.session_manager.run()`. Stateless HTTP mit JSON-Antworten; kein zweiter Datenbestand und keine eigenen JSON-RPC-Implementierungen.
@@ -31,7 +37,8 @@ Die aktuellen JSON-Schemas werden durch die offiziellen SDK-Dekoratoren aus Typa
 | `get_document` | Metadaten, Revision, Prüfpunkte, CAMT-Ergebnis, Herkunft/Revisionen |
 | `read_document` | PDF-Text pro Seite bzw. XML und deterministische CAMT-Daten |
 | `read_page_image` | Tatsächlicher MCP-Bildinhalt einer PDF-Seite / eines Bildbelegs |
-| `get_file_access` | Relative authentifizierte Original-/Seiten-URLs samt SHA256 |
+| `get_file_access` | Relative authentifizierte Original-/Seiten-URLs samt SHA256, nur bei `clean` |
+| `rescan_document` | Erneute Malwareprüfung anfordern, kein Freigabe-Override |
 | `prepare_upload` / `complete_upload` | Prüfsummen- und größengeprüfter authentifizierter Binärtransfer |
 | `claim_document` | 20-Minuten-Bearbeitungslease, ohne manuelle Korrekturen zu blockieren |
 | `save_document_result` | Strukturiertes Ergebnis mit Ausgangsversion, Validierung, Revision und Ablage |

@@ -58,7 +58,7 @@ def safe_filename(name):
 
 def atomic_write(relative, data, expected_hash=None):
     destination = path(relative)
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if expected_hash and checksum(data) != expected_hash:
         raise DomainError("Original-Prüfsumme stimmt nicht.", 409)
     if destination.exists():
@@ -122,9 +122,12 @@ def reconcile(document_id=None):
                     op.status = "superseded"
                     op.save(update_fields=["status"])
                     continue
+                from .security import require_clean
+
+                require_clean(doc)
                 if doc.company_id and doc.period:
                     ensure_month(doc.company, doc.period)
-                data = path(doc.original_path).read_bytes()
+                data = read_original(doc)
                 atomic_write(op.new_path, data, doc.sha256)
                 # Clean obsolete journal targets too: a crash may have published an earlier target
                 # before its transaction was committed.
@@ -147,7 +150,17 @@ def reconcile(document_id=None):
 
 
 def read_original(doc):
-    data = path(doc.original_path).read_bytes()
-    if checksum(data) != doc.sha256:
-        raise DomainError("Integritätsprüfung des Originals fehlgeschlagen.", 409)
-    return data
+    from .security import invalidate, require_clean
+
+    with transaction.atomic():
+        doc = Document.objects.select_for_update().get(id=doc.id)
+        require_clean(doc)
+        try:
+            data = path(doc.original_path).read_bytes()
+        except OSError:
+            data = None
+        if data is None or len(data) != doc.size or checksum(data) != doc.scanned_sha256:
+            invalidate(doc, "Integritätsprüfung des Originals fehlgeschlagen.")
+        else:
+            return data
+    raise DomainError("Integritätsprüfung des Originals fehlgeschlagen.", 423)

@@ -105,6 +105,12 @@ async def read_page_image(document_id: str, ctx: Context, page: int = 1) -> Imag
 async def get_file_access(document_id: str, ctx: Context) -> dict[str, Any]:
     """Authentifizierte relative HTTP-URLs für bytegleiches Original und Seitenzugriff; gleiche Origin wie MCP verwenden."""
     d = await call(ctx, lambda a: services.document_data(services.get_document(a, document_id)))
+    if d["security_status"] != "clean":
+        return {
+            "document_id": document_id,
+            "security_status": d["security_status"],
+            "reason": d["security_error"],
+        }
     return {
         "document_id": document_id,
         "sha256": d["sha256"],
@@ -115,6 +121,14 @@ async def get_file_access(document_id: str, ctx: Context) -> dict[str, Any]:
         "authentication": "Authorization: Bearer <same token>",
         "method": "GET",
     }
+
+
+@server.tool()
+async def rescan_document(document_id: str, ctx: Context) -> dict[str, Any]:
+    """Erneute Malwareprüfung anfordern. Sperre bleibt bis zum tatsächlichen erfolgreichen Scan bestehen."""
+    from .security import request_scan
+
+    return await call(ctx, request_scan, document_id)
 
 
 @server.tool()
@@ -232,18 +246,7 @@ async def list_dispatches(company_id: int, ctx: Context, package_id: str | None 
 async def list_import_errors(company_id: int, ctx: Context) -> list[dict]:
     """Nicht übernommene/zu große IMAP-Anhänge mit Fehler und dauerhaft gespeicherter Herkunft anzeigen."""
 
-    def get(a):
-        from .models import ImportSource
-
-        a.require(company_id)
-        return list(
-            ImportSource.objects.filter(mailbox__company_id=company_id)
-            .exclude(error="")
-            .order_by("-id")
-            .values("id", "provenance", "error")[:200]
-        )
-
-    return await call(ctx, get)
+    return await call(ctx, mail.import_errors, company_id)
 
 
 @server.tool()
@@ -258,7 +261,8 @@ async def list_month_folders(
 async def get_package(package_id: str, ctx: Context) -> dict[str, Any]:
     """Paketversion, eingefrorene Inhaltsliste und Prüfsumme lesen; authentifizierten Download erhalten."""
     data = await call(ctx, lambda a: packages.package_data(packages.get_package(a, package_id), True))
-    data["download_url"] = f"/api/packages/{package_id}/download/"
+    if not data["security_blocked"]:
+        data["download_url"] = f"/api/packages/{package_id}/download/"
     return data
 
 

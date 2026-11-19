@@ -116,6 +116,18 @@ class Document(models.Model):
     sha256 = models.CharField(max_length=64, db_index=True)
     size = models.PositiveBigIntegerField()
     media_type = models.CharField(max_length=80)
+    security_status = models.CharField(
+        max_length=10,
+        default="pending",
+        db_index=True,
+        choices=[(s, s) for s in ("pending", "scanning", "clean", "infected", "error")],
+    )
+    security_error = models.CharField(max_length=500, blank=True)
+    scanned_sha256 = models.CharField(max_length=64, blank=True)
+    scanned_at = models.DateTimeField(null=True)
+    quarantine_path = models.CharField(max_length=400, blank=True)
+    scan_attempts = models.PositiveIntegerField(default=0)
+    scan_due_at = models.DateTimeField(null=True)
     kind = models.CharField(max_length=30, choices=KINDS, blank=True)
     period = models.CharField(max_length=7, blank=True, db_index=True)
     account = models.ForeignKey(Account, null=True, blank=True, on_delete=models.PROTECT)
@@ -138,6 +150,18 @@ class Document(models.Model):
     class Meta:
         ordering = ["created_at", "id"]
         indexes = [models.Index(fields=["company", "period", "status"])]
+
+
+class ScanAttempt(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.ForeignKey(Document, on_delete=models.PROTECT, related_name="scans")
+    sha256 = models.CharField(max_length=64)
+    engine = models.CharField(max_length=200, blank=True)
+    result = models.CharField(max_length=10, default="scanning")
+    signature = models.CharField(max_length=200, blank=True)
+    reason = models.CharField(max_length=500, blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)
 
 
 class Revision(models.Model):

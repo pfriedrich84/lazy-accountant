@@ -21,6 +21,10 @@ x-app: &app
     DATA_ROOT: /data
     MAX_FILE_BYTES: "${MAX_FILE_BYTES:-26214400}"
     MAX_PACKAGE_BYTES: "${MAX_PACKAGE_BYTES:-268435456}"
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
+    CLAMAV_TIMEOUT: "${CLAMAV_TIMEOUT:-60}"
+    CLAMAV_MAX_SIGNATURE_AGE: "${CLAMAV_MAX_SIGNATURE_AGE:-172800}"
   volumes:
     - documents:/data
   restart: unless-stopped
@@ -41,6 +45,28 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    restart: unless-stopped
+
+  clamav:
+    # Latest stable checked via Cisco-Talos releases and Docker Hub (2026-11-19).
+    image: clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8
+    environment:
+      TZ: Etc/UTC
+      FRESHCLAM_CHECKS: "24"
+      CLAMAV_MAX_SIGNATURE_AGE: "${CLAMAV_MAX_SIGNATURE_AGE:-172800}"
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - ./docker/clamav/healthcheck.sh:/healthcheck.sh:ro
+    # No published ports and, deliberately, no document volume.
+    mem_limit: 3g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "sh", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10m
+      retries: 3
     restart: unless-stopped
 
   app:
@@ -84,3 +110,4 @@ services:
 volumes:
   postgres:
   documents:
+  clamav-signatures:

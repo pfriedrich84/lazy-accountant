@@ -5,6 +5,7 @@
 - `app`: Django/DRF, gebautes React-SPA, Django Admin, offizieller MCP-ASGI-Mount. Ein Uvicorn-Prozess; kein Node-Server im Betrieb.
 - `worker`: dieselbe Codebasis, separater Django-Q2-Cluster mit zwei Workern; ORM-Broker in PostgreSQL.
 - `db`: PostgreSQL 18.7, nur im Compose-Netz, benanntes Volume unter `/var/lib/postgresql` (Layout von PostgreSQL 18).
+- `clamav`: lokaler ClamAV 1.5.5 + freshclam, privater INSTREAM-Port, persistentes Signaturvolume, 3 GiB/2 CPUs. Kein Dokumentmount. Vollständiger Betrieb, Limits, Signaturalter, Quarantäne-/Löschregeln und Upgradeablauf: **[SECURITY.md](SECURITY.md)**.
 - `mail-test`: ausschließlich optionales Profil `test-mail`, GreenMail 2.1.15 mit **synthetischen** Testzugängen und loopbackgebundenen Ports. Nicht für echte Firmenpost verwenden.
 
 ### Dokumentvolume und späterer Netzwerkspeicher
@@ -16,12 +17,11 @@ Der Host-Port `HTTP_PORT` (Standard `8000`) wird standardmäßig über `HTTP_BIN
 ```text
 /data/  (Dokumentvolume)
   <eindeutiger-Firmenordner>/YYYY/MM/{ER,AR,Bankkonto,Wertpapiere}/
-  _originals/    unveränderliche führende Originaldateien
+  _quarantine/   nicht öffentliche Empfangsbytes, Transferreste und isolierte Funde
+  _originals/    freigegebene unveränderliche führende Originaldateien
   _inbox/       noch nicht vollständig zugeordnete Eingänge
   _packages/    unveränderliche ZIP-Snapshots
   _dispatches/  vorbereitete, prüfsummenbehaftete Mailteile
-  _uploads/     noch nicht abgeschlossene authentifizierte Transfers
-  _rejected/    erhaltene nicht unterstützte Mailanhänge
 ```
 
 Das Volume bleibt bei Container-Neubau, Neustart und normalem `docker compose down` erhalten. **`docker compose down -v` oder das Löschen des Volumes entfernt die gespeicherten Daten.** Kein Backupersatz.
@@ -124,7 +124,7 @@ Danach startet es App/Worker wieder. Ein währenddessen fehlschlagender Backup-L
 sh scripts/restore.sh backups/2026-11-18 --yes-replace
 ```
 
-Ablauf: SHA256 prüfen → App/Worker stoppen → Datenbank wiederherstellen → sicheren Dateibaum wiederherstellen → Journal/Integrität prüfen → verwaiste Aufträge sicher behandeln → App/Worker starten und Healthchecks abwarten. Archive mit Pfadausbruch, Symlinks oder Spezialdateien werden abgelehnt. Bei Fehler bleibt die Anwendung bewusst offline, statt mit halb wiederhergestellten Daten zu starten.
+Ablauf: SHA256 prüfen → App/Worker stoppen → Datenbank wiederherstellen → sicheren Dateibaum wiederherstellen → migrieren und `prepare_security` (Quarantänetrennung, Scannachweise) → Journal/Integrität prüfen → verwaiste Aufträge sicher behandeln → App/Worker starten und Healthchecks abwarten. Quarantäne und Scan-Audit sind Bestandteil der gemeinsamen Sicherung. Fehlende vertrauenswürdige Scans sperren Zugriffe bis zur erneuten Prüfung; das Signaturvolume kann über freshclam neu aufgebaut werden. Archive mit Pfadausbruch, Symlinks oder Spezialdateien werden abgelehnt. Bei Fehler bleibt die Anwendung bewusst offline, statt mit halb wiederhergestellten Daten zu starten.
 
 Laufende Aufträge des alten Prozesses können keinen gültigen Lease behalten. SMTP-Aufträge mit unbekanntem Ausgang bleiben ungeklärt; Wiederherstellung ist **kein autorisierter Neuversand**. Nach Restore Paket- und Versandstände vergleichen und die tatsächliche Orca-Verbindung/Mailzugänge gesondert prüfen.
 

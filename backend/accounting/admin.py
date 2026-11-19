@@ -23,6 +23,21 @@ class TokenAdmin(admin.ModelAdmin):
 
 # Snapshots are intentionally read-only, including through Django Admin.
 class ImmutableAdmin(admin.ModelAdmin):
+    def get_fields(self, request, obj=None):
+        fields = super().get_fields(request, obj)
+        hidden = set()
+        if isinstance(obj, models.Document) and obj.security_status != "clean":
+            hidden = {"metadata", "issues", "parser_result", "parser_error"}
+        elif isinstance(obj, models.Revision) and obj.document.security_status != "clean":
+            hidden = {"snapshot"}
+        elif isinstance(obj, models.PackageItem) and obj.document.security_status != "clean":
+            hidden = {"metadata"}
+        elif isinstance(obj, models.Package):
+            # REST/MCP provide the security-redacted representation. Never
+            # expose a historical unredacted snapshot through the admin form.
+            hidden = {"snapshot"}
+        return [field for field in fields if field not in hidden]
+
     def has_add_permission(self, request):
         return False
 
@@ -41,6 +56,7 @@ for model in (
     models.SendAttempt,
     models.Document,
     models.FileOperation,
+    models.ScanAttempt,
 ):
     admin.site.register(model, ImmutableAdmin)
 

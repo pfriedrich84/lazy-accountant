@@ -54,7 +54,7 @@ def put_upload(actor, upload_id, data):
             raise DomainError("Upload stimmt nicht mit angekündigter Größe/Prüfsumme überein.", 409)
         if t.document_id:
             return {"upload_id": str(t.id), "document_id": str(t.document_id)}
-        storage.atomic_write(f"_uploads/{t.id}.bin", data, t.expected_sha256)
+        storage.atomic_write(f"_quarantine/transfers/{t.id}.bin", data, t.expected_sha256)
         t.uploaded = True
         t.save(update_fields=["uploaded"])
     return {"upload_id": str(t.id), "uploaded": True}
@@ -67,19 +67,22 @@ def complete_upload(actor, upload_id):
             return services.document_data(services.get_document(actor, t.document_id))
         if not t.uploaded:
             raise DomainError("Dateitransfer noch nicht abgeschlossen.", 409)
-        data = storage.path(f"_uploads/{t.id}.bin").read_bytes()
+        data = storage.path(f"_quarantine/transfers/{t.id}.bin").read_bytes()
         if storage.checksum(data) != t.expected_sha256:
             raise DomainError("Upload-Prüfsumme stimmt nicht.", 409)
         result = services.ingest(actor, t.filename, data, t.company_id, "ticket:" + str(t.id))
         t.document_id = result["document"]["id"]
         t.save(update_fields=["document"])
-    storage.path(f"_uploads/{t.id}.bin").unlink(missing_ok=True)
+    storage.path(f"_quarantine/transfers/{t.id}.bin").unlink(missing_ok=True)
     return result["document"]
 
 
 def claim_document(actor, document_id, run_id, base_version):
     with transaction.atomic():
         d = services.get_document(actor, document_id, "process", lock=True)
+        from .security import require_clean
+
+        require_clean(d)
         if d.version != base_version:
             raise DomainError("Ausgangsversion ist nicht mehr aktuell.", 409)
         prior = ProcessingClaim.objects.filter(document=d).first()

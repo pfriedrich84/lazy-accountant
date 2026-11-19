@@ -659,9 +659,55 @@ export default function DocumentDetail() {
   const query = useQuery({
     queryKey: ["document", documentId],
     queryFn: () => api<Document>(`documents/${documentId}/`),
+    refetchInterval: 3000,
+  });
+  const rescan = useMutation({
+    mutationFn: () => api(`documents/${documentId}/scan/`, { method: "POST" }),
+    onSuccess: () => query.refetch(),
   });
   if (query.isPending) return <Loading />;
   if (!query.data) return <ErrorAlert error={query.error} />;
+  if (query.data.security_status !== "clean") {
+    const doc = query.data;
+    return (
+      <Stack spacing={2}>
+        <Heading
+          title={doc.original_name}
+          subtitle={`SHA256 ${doc.sha256} · ${doc.size} Bytes`}
+        />
+        <Alert
+          severity={doc.security_status === "infected" ? "error" : "warning"}
+        >
+          Sicherheitssperre: {doc.security_status}. {doc.security_error}
+          Vorschau, Original, Textextraktion, Bearbeitung und Paketaufnahme sind
+          gesperrt.
+        </Alert>
+        <Typography>
+          Malwareprüfung ist eine zusätzliche Schutzschicht, keine
+          Sicherheitsgarantie.
+        </Typography>
+        {!!doc.security_impact?.package_ids.length && (
+          <Alert severity="error">
+            Betroffene Pakete: {doc.security_impact.package_ids.join(", ")}.
+            Versandaufträge: {doc.security_impact.dispatch_ids.join(", ")}
+          </Alert>
+        )}
+        <ErrorAlert error={rescan.error} />
+        <Button
+          disabled={
+            rescan.isPending ||
+            ["pending", "scanning"].includes(doc.security_status)
+          }
+          onClick={() => rescan.mutate()}
+        >
+          Erneute Prüfung anfordern (keine Freigabe ohne Scan)
+        </Button>
+        <Button component={Link} to="/documents">
+          Zur Liste
+        </Button>
+      </Stack>
+    );
+  }
   return (
     <Editor key={`${query.data.id}:${query.data.version}`} doc={query.data} />
   );

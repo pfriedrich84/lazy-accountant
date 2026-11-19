@@ -166,6 +166,9 @@ def finish_agent_run(actor, job_id, result, status="done"):
 def maintenance():
     from .storage import reconcile
 
+    from .security import maintenance as scan_maintenance
+
+    scan_maintenance()
     reconcile()
     cutoff = timezone.now() - timedelta(seconds=480)
     for job_id in Job.objects.filter(status="running", heartbeat__lt=cutoff).values_list("id", flat=True):

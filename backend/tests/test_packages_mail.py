@@ -194,8 +194,10 @@ def test_imap_alias_unknown_and_unsupported_preserved(actor, companies):
         b"unsupported original", maintype="application", subtype="octet-stream", filename="bad.exe"
     )
     mail.import_message(actor, m, "1", "2", msg.as_bytes())
-    rejected = ImportSource.objects.exclude(error="").get()
-    assert storage.path(rejected.provenance["preserved_path"]).read_bytes() == b"unsupported original"
+    rejected = ImportSource.objects.get(document__original_name="bad.exe")
+    assert rejected.document.security_status == "error"
+    assert storage.path(rejected.document.quarantine_path).read_bytes() == b"unsupported original"
+    assert mail.import_errors(actor, companies[0].id)[0]["security_status"] == "error"
 
 
 def create_ready_package(user, actor, company):
