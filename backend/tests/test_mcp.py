@@ -156,6 +156,7 @@ def test_real_streamable_http_month_and_skill_contract(mcp_url, actor, companies
                         "kind": kind,
                         "period": "2026-10",
                         "metadata": metadata,
+                        "category_id": assigned["categories"][0]["id"] if index == 0 else None,
                         "account_id": accounts["depot" if kind == "security_pdf" else "bank"]
                         if bank
                         else None,
@@ -221,6 +222,49 @@ def test_real_streamable_http_month_and_skill_contract(mcp_url, actor, companies
                     {"job_id": run["id"], "result": {"package_id": package["id"], "documents": identifiers}},
                 )
                 assert (await call("get_job", {"job_id": run["id"]}))["status"] == "done"
+                # Proposal-only reporting needs process, not admin; it must not
+                # create categories or recategorize already approved documents.
+                assert not assigned["permissions"]["admin"]
+                before = {id: await call("get_document", {"document_id": id}) for id in identifiers}
+                category_run = await call(
+                    "start_agent_run",
+                    {"company_id": company.id, "period": "2026-10", "idempotency_key": "category-analysis"},
+                )
+                suggestions = [
+                    {
+                        "company_id": company.id,
+                        "name": "Synthetische Testbelege",
+                        "existing_category_id": None,
+                        "reason": "Die gelesenen Beispieldokumente enthalten die Kennzeichnung MCP synthetic.",
+                        "document_ids": identifiers[:2],
+                    }
+                ]
+                report = {
+                    "analysis_only": True,
+                    "documents": identifiers,
+                    "category_suggestions": suggestions,
+                }
+                await call(
+                    "report_agent_run", {"job_id": category_run["id"], "status": "running", "result": report}
+                )
+                progress = await call("get_job", {"job_id": category_run["id"]})
+                assert progress["result"] == report
+                await call(
+                    "report_agent_run",
+                    {"job_id": category_run["id"], "status": "done", "result": progress["result"]},
+                )
+                finished = await call("get_job", {"job_id": category_run["id"]})
+                assert finished["status"] == "done" and finished["result"] == report
+                assert (await call("list_assignments", {"company_id": company.id}))["categories"] == assigned[
+                    "categories"
+                ]
+                for id in identifiers:
+                    after = await call("get_document", {"document_id": id})
+                    assert after == before[id]
+                assert before[identifiers[0]]["category_id"] == assigned["categories"][0]["id"]
+                assert (await call("get_package", {"package_id": package["id"]}))["sha256"] == package[
+                    "sha256"
+                ]
                 # Token has no permission on the other company or on SMTP.
                 forbidden = await client.call_tool("list_assignments", {"company_id": companies[1].id})
                 assert forbidden.is_error

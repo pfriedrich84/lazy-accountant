@@ -20,6 +20,22 @@ Unterstützt wird der gemeinsame strukturierte Kern von `Stmt`, `Rpt` und `Ntfct
 
 Dies ist **keine vollständige XSD-Validierung** aller Bank-Spezialvarianten und kein Vollimport sämtlicher CAMT-Detailfelder. Fehlende Angaben bleiben leer, Konten-/Firmenzuordnung und unvollständige/mehmonatige Zeiträume müssen geprüft werden. Das XML-Original bleibt für die Steuerberatung und spätere Parsererweiterungen erhalten. CAMT und PDF desselben Auszugs werden verknüpft, aber weder zusammengeführt noch gegeneinander dedupliziert.
 
+## Interpretation von Kontrollabweichungen (Skill 1.2)
+
+Der Agent unterscheidet **Ausleseverlust**, **quelleninterne Zählabweichung** und **Geld-/Saldoabweichung**. `TxsSummry/NbOfNtries` ist eine Behauptung im Original, kein Beweis dafür, wie viele direkte `Ntry`-Elemente tatsächlich vorhanden sind. `TxDtls` können Unterpositionen einer Sammelbuchung sein und dürfen nicht mit `Ntry` gleichgesetzt werden.
+
+Bei Auffälligkeiten muss ein entity-sicheres, deterministisches Prüfskript mit `Decimal` die tatsächlichen Originaleinträge, Parserausgabe und deklarierten Zähler/Summen je Auszug und Währung vergleichen. Der aktuelle Kernparser liefert keine fertigen Summen-/Saldo-Diagnosen; ein Parsererfolg allein ersetzt diese Kontrolle nicht. Geeignete Buchungs-Anfangs-/Endsalden und Soll/Haben-Vorzeichen beachten; keine verfügbaren Salden oder Fremdwährungs-Unterbeträge dazumischen. Ein vorhandenes passendes PDF muss die Bestands-/Betragskontrolle bestätigen.
+
+| Befund | Behandlung |
+| --- | --- |
+| Original enthält weniger Einträge als sein Zählfeld; alle tatsächlichen Einträge sind vollständig gelesen und erforderliche Summen-/Saldo-/PDF-Kontrollen stimmen | Quellenanomalie als `metadata.note` und sichere Feldevidenz erhalten; allein kein Freigabeblocker |
+| Originaleinträge fehlen in der Parserausgabe oder Beträge/Salden widersprechen sich | Offener Prüfpunkt, keine Freigabe |
+| Benötigte Kontrollen fehlen oder Sammelbuchung/Währung/Zuordnung bleibt unklar | Ungeklärt lassen, keine vermeintliche Entwarnung |
+
+Nie eine zusätzliche Buchung erfinden oder Original/Zählfelder korrigieren. Eine Null-/Abschlusszeile ist nur bei Beleg eine Erklärung, sonst lediglich eine Hypothese. Andere offene Punkte bleiben bestehen. Die Regel ändert die **Agenteninterpretation**, nicht die Originale oder die Backend-Freigabevalidierung.
+
+Ein PDF ohne eigenen Zeitraumaufdruck darf den ausdrücklich angegebenen Zeitraum eines eindeutig passenden CAMT übernehmen. Konto/Firma, Auszugsidentität, Buchungsbestand und Kontrollwerte müssen übereinstimmen; Datumswidersprüche bleiben offen. CAMT-Dokument-ID, XML-Pfad und Wert in der PDF-Evidenz dokumentieren und beide Dokumente verknüpfen. Nicht aus erster Buchung oder Saldenstichtag einen vermeintlichen Monatsbeginn ableiten; Buchungs- und Valutadatum unterscheiden.
+
 ## Fehler und Grenzen
 
 - Unbekannter/fehlender Namespace, kaputtes XML oder fehlender Auszug: `parser_error`, offene Prüfpunkte, keine automatische Freigabe.
