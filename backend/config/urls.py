@@ -16,6 +16,8 @@ urlpatterns = [
     path("api/companies/<int:company_id>/<str:collection>/<int:object_id>/", api.Assignments.as_view()),
     path("api/uploads/<uuid:upload_id>/", api.UploadTransfer.as_view()),
     path("api/documents/", api.Documents.as_view()),
+    path("api/document-names/<str:action>/", api.DocumentNames.as_view()),
+    path("api/documents/<uuid:document_id>/name/", api.DocumentName.as_view()),
     path("api/documents/<uuid:document_id>/", api.DocumentDetail.as_view()),
     path("api/documents/<uuid:document_id>/<str:representation>/", api.DocumentFile.as_view()),
     path("api/reconciliation/<str:action>/", api.Reconciliation.as_view()),

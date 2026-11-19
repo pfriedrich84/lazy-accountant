@@ -168,6 +168,45 @@ def test_real_streamable_http_month_and_skill_contract(mcp_url, actor, companies
                         "save_document_result", {"result": result, "run_id": run["id"]}
                     )
                     assert conflict.is_error
+                # Names use the same versioned service as REST; manual overrides survive backfill.
+                doc = await call("get_document", {"document_id": identifiers[1]})
+                assert doc["name_source"] == "generated" and doc["proposed_name"] == doc["effective_name"]
+                renamed = await call(
+                    "set_document_name",
+                    {
+                        "document_id": doc["id"],
+                        "base_version": doc["version"],
+                        "name": "MCP Übergabe.pdf",
+                    },
+                )
+                assert renamed["status"] == "ready" and renamed["original_name"] == doc["original_name"]
+                conflict = await client.call_tool(
+                    "set_document_name",
+                    {
+                        "document_id": doc["id"],
+                        "base_version": doc["version"],
+                        "name": "Stale.pdf",
+                    },
+                )
+                assert conflict.is_error
+                names_preview = await call("preview_document_names", {"document_ids": [doc["id"]]})
+                assert (
+                    names_preview[0]["manual_protected"]
+                    and names_preview[0]["new_name"] == "MCP Übergabe.pdf"
+                )
+                backfilled = await call(
+                    "backfill_document_names",
+                    {
+                        "entries": [
+                            {
+                                "document_id": doc["id"],
+                                "base_version": renamed["version"],
+                            }
+                        ]
+                    },
+                )
+                assert backfilled[0]["effective_name"] == "MCP Übergabe.pdf"
+                assert backfilled[0]["version"] == renamed["version"]
                 # Paginates the complete month without skipping any UUID, including during repeat runs.
                 cursor, found = None, []
                 while True:
@@ -279,6 +318,29 @@ def test_real_streamable_http_month_and_skill_contract(mcp_url, actor, companies
                 denied = await client.call_tool(
                     "prepare_upload",
                     {"filename": "x.pdf", "size": 1, "sha256": "a" * 64, "company_id": company.id},
+                )
+                assert denied.is_error
+                preview = await client.call_tool("preview_document_names", {"document_ids": [identifiers[1]]})
+                assert not preview.is_error
+                denied = await client.call_tool(
+                    "set_document_name",
+                    {
+                        "document_id": identifiers[1],
+                        "base_version": 3,
+                        "name": "Forbidden.pdf",
+                    },
+                )
+                assert denied.is_error
+                denied = await client.call_tool(
+                    "backfill_document_names",
+                    {
+                        "entries": [
+                            {
+                                "document_id": identifiers[1],
+                                "base_version": 3,
+                            }
+                        ]
+                    },
                 )
                 assert denied.is_error
 

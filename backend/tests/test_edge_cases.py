@@ -264,7 +264,9 @@ def test_bootstrap_two_complete_isolated_months(user, actor, companies, tmp_path
             assert all(
                 f"{company.folder}/2026/10/{folder}/" in archive.namelist() for folder in storage.FOLDERS
             )
-            assert len([name for name in archive.namelist() if name.endswith("konto.xml")]) == 1
+            camt = [d for d in snapshot["documents"] if d["kind"] == "bank_camt"]
+            assert len(camt) == 1 and camt[0]["archive_path"] in archive.namelist()
+            assert storage.checksum(archive.read(camt[0]["archive_path"])) == camt[0]["sha256"]
     call_command("bootstrap", sample_month="2026-10", classified=True, output=str(tmp_path))
     assert Document.objects.count() == 16
     assert (tmp_path / "eingang.pdf").exists()

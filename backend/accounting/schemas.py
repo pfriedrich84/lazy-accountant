@@ -72,6 +72,10 @@ class Metadata(BaseModel):
     gross: Decimal | None = None
     taxes: list[TaxLine] = Field(default_factory=list, max_length=100)
     subtype: str | None = Field(default=None, max_length=100)
+    confirmed_partner_name: str | None = Field(default=None, max_length=300)
+    bank_short_name: str | None = Field(default=None, max_length=100)
+    valuation_date: Date | None = None
+    isin: str | None = Field(default=None, pattern=r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
     note: str = Field(default="", max_length=10000)
     open_points: list[str] = Field(default_factory=list, max_length=100)
     evidence: dict[str, Evidence] = Field(default_factory=dict)
