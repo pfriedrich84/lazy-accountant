@@ -104,3 +104,33 @@ Auf ausdrücklichen Wunsch nach Merge der Erstversion ist die Standardablage jet
 `init-env.py` erzeugt nur noch Secrets/Konfiguration, keine Hostablage; neuer Regressionstest prüft private Rechte, unabhängige Secrets, Nichtüberschreiben und fehlende Hostordnerabhängigkeit. Lokal **61 PostgreSQL-Tests** und **60 SQLite-Tests plus 1 bewusster Lock-Skip** erfolgreich; Ruff und tatsächliche Compose-Konfigurationsprüfung für gemeinsames Volume, Nicht-root-Benutzer und Host-Port ebenfalls erfolgreich. Die CI prüft zusätzlich den tatsächlich gemeinsam nutzbaren Volume-Mount einschließlich Eigentümer/Modus und publizierten Port per Container-Inspektion; Browserfixtures werden aus dem Container kopiert. Der vollständige Mail-/MCP-/Browser-/Backup-/Restore-Lauf verwendet damit denselben Volume-Betrieb, nicht einen versteckten Test-Bind-Mount.
 
 Noch offen ist ausschließlich die kundenspezifische Live-Einrichtung gemäß Betriebsdokumentation: realer Host/Speicher, echte Firmendaten/Mailanbieter/Empfänger, repräsentative anonymisierte Originale und tatsächlicher Orca-Agent/Termin. Der synthetische Client behauptet keinen produktiven Orca-Lauf. Weitere ausgeführte Prüfungen werden ergänzt.
+
+## Issue #7 – reversibler Nichtbeleg-Ausschluss (2026-11-19)
+
+Eigener Clone/Branch `feat/7-reversible-document-exclusion` auf Basis `a1587883`. Gemeinsamer Arbeitsbereich, dessen uncommittetes `docs/PLAN.md` und der bestehende Review-Clone bleiben unverändert. Keine produktiven Daten, Mailzugänge oder Deployments verwendet.
+
+Implementiert:
+- Additive Migration, unabhängiger Ausschlusszustand, Grund/Actor/Zeit und versionierte exclude/restore-Revisionen. Gemeinsamer Service für REST/MCP, strikte Eingabeprüfung, bestehende process-/Inboxrechte, Idempotenz einschließlich historischem Retry nach Restore.
+- Aktive Listen/Monatsordner/Zähler und expliziter Ausschlussfilter, geschützter Originalzugriff, Reimport/Deduplizierung ohne Reaktivierung, keine Kaskade auf verknüpfte Rechnungen.
+- Journalisierte Materialisierung außerhalb der Monatsordner; schnelle exclude→restore-Folge und Pending-Recovery ohne Originalverlust.
+- Paket-v2 mit getrennten nicht blockierenden `intentional_exclusions`, zustandsbewussten Nachtragsketten und v1-Kompatibilität. Persönliche Inbox-Ausschlüsse nur in Vorschau, nicht im Firmenexport. Alte ZIPs/Snapshots/Dispatches bleiben unverändert.
+- UI-Dialoge, Historie, Paketbezugwarnung, Versionskonflikte und stabiler Netzwerk-Retry; Skills/MCP-/Upgradevertrag aktualisiert. Details: [DOCUMENT-EXCLUSIONS.md](DOCUMENT-EXCLUSIONS.md).
+
+Tatsächlich lokal ausgeführt:
+- Python **3.15.2**, PostgreSQL **18.7** in eigener temporärer, nur an Loopback gebundener Testinstanz: gesamte Backend-Suite **126 Tests bestanden**. Nach abschließender Nachtrags-Refaktorierung nochmals **38 Paket-/Ausschluss-/Migrationstests bestanden**.
+- SQLite: **124 Tests bestanden, 2 PostgreSQL-Zeilensperrentests bewusst übersprungen**.
+- Echter MCP-v2-Streamable-HTTP-Test mit offiziellem Client, REST-Restore, Originalbytes, Rechte-/Version-/Validierungsfehlern sowie altem exclude-Retry nach Restore; keine Mock-Protokollabkürzung.
+- PostgreSQL-Paralleltest fand einen tatsächlichen FK-bedingten Actor/Firma-Deadlock beim gleichzeitigen Paketbau; mit konsistenter Actor→Firma→Dokument-Sperrreihenfolge behoben und erneut bestanden. Zusätzlicher Interleaving-Test verhindert, dass eine nach Commit erfolgte Wiederherstellung das historische exclude-Receipt überschreibt.
+- Ruff Check/Format, `manage.py check`, `makemigrations --check --dry-run`: erfolgreich, keine fehlende Migration.
+- Frontend mit lokalem Node **26.13.0** (Repository-Pin **26.13.1**, npm meldet entsprechend Engine-Warnung): Typecheck, **12 Vitest-Tests** und Produktionsbuild erfolgreich; keine Lock-/Abhängigkeitsänderung.
+- Tatsächliche Playwright-Läufe gegen den eigenen ASGI-Server: **5 Browserfälle bestanden, 1 bereits bestehender redundanter Mobil-Monatslauf bewusst übersprungen**. Einschließlich neuem Ausschluss-/Restore-Ablauf auf Desktop und Mobil, bestehender Beleg-/Paketabläufe und beider vollständigen Firmenmonate. Lokale Browserinstanz mit eigener SQLite-DB/Dateiablage und `Q_SYNC=1`; ohne Worker/Testmodus warteten die Paketjobs zunächst erwartbar auf Ausführung. Kein Nachweis eines separaten lokalen Workers durch diesen Browserlauf.
+
+Nicht erneut lokal ausgeführt: Docker-Compose-/GreenMail-/separater Worker-/gemeinsamer Backup-Restore-Gesamtlauf. Der bestehende CI-Workflow deckt diesen Pfad im PR ab; dessen Ergebnis separat prüfen, nicht aus den lokalen Tests ableiten. Kein Deployment und keine Freigabe für einen Rollback auf alten, ausschlussunfähigen Anwendungscode.
+
+Erster [PR-CI-Lauf 44607519791](https://github.com/pfriedrich84/lazy-accountant/actions/runs/44607519791): Backend und Frontend erfolgreich; Compose einschließlich echter Mail/Worker-, Browser- und Backup/Restore-Prüfung bis zum ursprünglichen Restore-Replay erfolgreich. Der zusätzliche neue Versand nach Restore wurde korrekt wegen eines aktiven unzugeordneten **Browsertestdokuments** blockiert. Der neue Test hatte nach seiner Restore-Abnahme die synthetische Grafik aktiv zurückgelassen. Testbereinigung ergänzt: ausschließlich diese eigene Grafik nach geprüftem Restore erneut mit Grund ausschließen. Keine Abschwächung der Versandregel oder globale Inbox-Bereinigung. Ergebnis des Folgelaufs wird im Draft-PR #17 separat dokumentiert.
+
+### Integration des zwischenzeitlich gemergten PR #15 vor Merge von #17
+
+Auf Mergeauftrag `main` bei `72b370c` integriert: lesbare Übergabenamen und reversible Ausschlüsse sind gemeinsam verfügbar (REST/MCP/UI/Skills sowie Exportpfade). Die noch nicht ausgelieferte Ausschlussmigration folgt als **`0006_document_exclusion`** auf die bereits in main befindliche Übergabenamen-Migration `0005`; kein divergierender Migrationsgraph. Zusätzlicher Regressionstest prüft unveränderten manuellen Übergabenamen durch Ausschluss/Restore sowie eingefrorene Alt-ZIPs. Der Migrationstest startet nun beim aktuellen main-Schema und erhält dort vorhandene manuelle Namen. Browserauswahl verwendet die Originalnamen-Zeile statt des jetzt absichtlich abweichenden Übergabenamens.
+
+Erneut lokal geprüft: **157 PostgreSQL-Tests**, **155 SQLite-Tests mit 2 PostgreSQL-Skips**, **15 Frontendtests**, Typecheck/Build, Ruff und migrationsfreier Model-Check erfolgreich. Vollständige Playwright-Suite gegen neue isolierte ASGI-Testinstanz mit `Q_SYNC=1`: **5 bestanden, 1 bestehender Skip**. PR-CI für den integrierten Commit ist vor dem Merge erneut abzuwarten.

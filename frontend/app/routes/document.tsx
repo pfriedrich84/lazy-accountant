@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { ErrorAlert, Heading, Loading, Status } from "../components";
 import { useApp } from "./shell";
+import { DocumentExclusion } from "../document-exclusion";
 import { DocumentName } from "../document-names";
 
 function Editor({ doc }: { doc: Document }) {
@@ -148,6 +149,7 @@ function Editor({ doc }: { doc: Document }) {
           </Stack>
         }
       />
+      <DocumentExclusion doc={doc} />
       <DocumentName doc={doc} />
       <ErrorAlert error={save.error || assignments.error} />
       {doc.filing_status === "pending" && (
@@ -285,7 +287,11 @@ function Editor({ doc }: { doc: Document }) {
           </Accordion>
         </Paper>
         <Stack spacing={2}>
-          <Paper sx={{ p: 3 }}>
+          <Paper
+            component="fieldset"
+            disabled={!!doc.is_excluded}
+            sx={{ p: 3, m: 0, minWidth: 0, border: 0 }}
+          >
             <Typography variant="h6" sx={{ mb: 2 }}>
               Zuordnung & Prüfung
             </Typography>
@@ -644,7 +650,11 @@ function Editor({ doc }: { doc: Document }) {
                 <Chip
                   key={r.version}
                   size="small"
-                  label={`v${r.version} · ${r.source} · ${new Date(r.created_at).toLocaleString("de-AT")}`}
+                  label={`v${r.version} · ${r.source} · Bearbeiter ${r.actor_id} · ${new Date(r.created_at).toLocaleString("de-AT")}${r.reason ? ` · ${r.reason}` : ""}`}
+                  sx={{
+                    height: "auto",
+                    "& .MuiChip-label": { whiteSpace: "normal", py: 0.5 },
+                  }}
                 />
               ))}
             </Stack>

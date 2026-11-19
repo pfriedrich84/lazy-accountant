@@ -82,9 +82,12 @@ def claim_document(actor, document_id, run_id, base_version):
         d = services.get_document(actor, document_id, "process", lock=True)
         if d.version != base_version:
             raise DomainError("Ausgangsversion ist nicht mehr aktuell.", 409)
+        if d.is_excluded:
+            raise DomainError("Dokument ist ausgeschlossen. Zuerst wiederherstellen.", 409)
         prior = ProcessingClaim.objects.filter(document=d).first()
         if (
             prior
+            and prior.base_version == d.version
             and prior.expires_at > timezone.now()
             and (prior.actor_id != actor.user_id or prior.run_id != run_id)
         ):

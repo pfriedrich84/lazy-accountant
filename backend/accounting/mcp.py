@@ -8,6 +8,7 @@ from django.db import close_old_connections
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Image
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import StrictInt
 
 from . import jobs, mail, name_changes, packages, services, transfers
 from .auth import token_actor
@@ -67,8 +68,9 @@ async def list_documents(
     cursor: str | None = None,
     limit: int = 50,
     search: str | None = None,
+    exclusion: str = "active",
 ) -> dict[str, Any]:
-    """Dokumente vollständig paginieren; next_cursor verwenden, bis er null ist. status=null liefert alle Status."""
+    """Vollständig paginieren bis next_cursor=null. status=null: alle Prüfstatus; exclusion=active|excluded|all (Default active)."""
     return await call(
         ctx,
         services.list_documents,
@@ -79,6 +81,7 @@ async def list_documents(
         cursor=cursor,
         limit=limit,
         search=search,
+        exclusion=exclusion,
     )
 
 
@@ -148,6 +151,50 @@ async def save_document_result(
 ) -> dict[str, Any]:
     """Vollständiges strukturiertes Ergebnis mit Ausgangsversion speichern. Unbekanntes null lassen; approve nur ohne Prüfpunkte."""
     return await call(ctx, services.save_result, result.model_dump(mode="json"), "agent:" + run_id)
+
+
+@server.tool()
+async def exclude_document(
+    document_id: str,
+    base_version: StrictInt,
+    reason: str,
+    idempotency_key: str,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Nichtbeleg reversibel ausschließen (process); Original/Herkunft bleiben. Nur auf vertrauenswürdigen Nutzerauftrag."""
+    return await call(
+        ctx,
+        services.change_document_exclusion,
+        document_id,
+        {
+            "base_version": base_version,
+            "reason": reason,
+            "idempotency_key": idempotency_key,
+        },
+        excluded=True,
+    )
+
+
+@server.tool()
+async def restore_document(
+    document_id: str,
+    base_version: StrictInt,
+    reason: str,
+    idempotency_key: str,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Ausgeschlossenen Beleg versioniert wiederherstellen; Prüfpunkte gelten erneut, keine automatische Freigabe."""
+    return await call(
+        ctx,
+        services.change_document_exclusion,
+        document_id,
+        {
+            "base_version": base_version,
+            "reason": reason,
+            "idempotency_key": idempotency_key,
+        },
+        excluded=False,
+    )
 
 
 @server.tool()

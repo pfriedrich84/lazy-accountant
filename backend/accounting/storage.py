@@ -91,6 +91,9 @@ def ensure_month(company, period):
 
 def desired_path(doc):
     filename = f"{doc.id}_{safe_filename(doc.original_name)}"
+    if doc.is_excluded:
+        scope = f"company-{doc.company_id}" if doc.company_id else f"inbox-{doc.inbox_owner_id}"
+        return f"_excluded/{scope}/{filename}"
     if doc.company_id and doc.period and doc.kind in KIND_FOLDER:
         year, month = doc.period.split("-")
         return f"{doc.company.folder}/{year}/{month}/{KIND_FOLDER[doc.kind]}/{filename}"
