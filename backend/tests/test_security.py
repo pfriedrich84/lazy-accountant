@@ -10,7 +10,7 @@ from django.utils import timezone
 from pypdf import PdfWriter
 from PIL import Image
 
-from accounting import mail, packages, scanner, security, services, storage, transfers
+from accounting import mail, name_changes, packages, scanner, security, services, storage, transfers
 from accounting.auth import DomainError
 from accounting.demo import sample_camt, sample_image, sample_pdf
 from accounting.models import Document, ImportSource, Mailbox, Package, ScanAttempt
@@ -64,6 +64,10 @@ def assert_blocked(client, actor, doc):
     assert exc.value.status == 423
     with pytest.raises(DomainError):
         services.save_result(actor, result(services.document_data(doc), doc.company_id, approve=True))
+    with pytest.raises(DomainError):
+        name_changes.preview(actor, [str(doc.id)])
+    with pytest.raises(DomainError):
+        name_changes.set_name(actor, str(doc.id), doc.version, "must-stay-blocked.pdf")
     preview = packages.package_preview(actor, doc.company_id, ["2026-10"])
     assert not preview["documents"]
     assert preview["security_blocked"][0]["document"]["id"] == str(doc.id)
@@ -96,6 +100,7 @@ def test_clean_release_exact_bytes(actor, companies, data, name, media):
     scan(doc)
     assert doc.security_status == "clean"
     assert doc.media_type == media
+    assert doc.handover_name.endswith(name.rsplit(".", 1)[-1])
     assert doc.scanned_sha256 == storage.checksum(data)
     assert storage.read_original(doc) == data
     storage.reconcile(doc.id)
