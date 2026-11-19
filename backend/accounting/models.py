@@ -308,6 +308,106 @@ class ProcessingClaim(models.Model):
     expires_at = models.DateTimeField()
 
 
+class BankTransaction(models.Model):
+    """Canonical booked movement; originals live in BankTransactionSource."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.PROTECT)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+    identity = models.CharField(max_length=64)
+    amount = models.DecimalField(max_digits=20, decimal_places=6)
+    currency = models.CharField(max_length=3)
+    direction = models.CharField(max_length=4)
+    booking_date = models.DateField(null=True)
+    value_date = models.DateField(null=True)
+    bank_reference = models.CharField(max_length=300)
+    party_name = models.CharField(max_length=300, blank=True)
+    party_iban = models.CharField(max_length=100, blank=True)
+    remittance = models.TextField(blank=True)
+    booked = models.BooleanField(default=False)
+    reversal = models.BooleanField(default=False)
+    references = models.JSONField(default=dict)
+    review_points = models.JSONField(default=list)
+    reversal_of = models.OneToOneField(
+        "self", null=True, on_delete=models.PROTECT, related_name="bank_reversal"
+    )
+    reversal_applied_at = models.DateTimeField(null=True)
+    reversal_actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="bank_reversals"
+    )
+    issues = models.JSONField(default=list)
+    version = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["company", "account", "identity"], name="unique_bank_identity"),
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_bank_amount"),
+        ]
+
+
+class BankTransactionSource(models.Model):
+    transaction = models.ForeignKey(BankTransaction, on_delete=models.PROTECT, related_name="sources")
+    document = models.ForeignKey(Document, on_delete=models.PROTECT)
+    document_version = models.PositiveIntegerField()
+    locator = models.CharField(max_length=160)
+    parser_version = models.CharField(max_length=40, default="reconciliation-v1")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["document", "locator"], name="unique_bank_source"),
+        ]
+
+
+class VerifiedBankParty(models.Model):
+    """Explicitly trusted party/account pair, never learned from invoice text."""
+
+    company = models.ForeignKey(Company, on_delete=models.PROTECT)
+    name = models.CharField(max_length=300)
+    iban = models.CharField(max_length=100)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    reason = models.CharField(max_length=1000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="revoked_bank_parties"
+    )
+    revocation_reason = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company", "name", "iban"],
+                condition=models.Q(revoked_at__isnull=True),
+                name="unique_verified_bank_party",
+            ),
+        ]
+
+
+class PaymentAllocation(models.Model):
+    """Bank-only initial adapter for imported ER/AR; not a second Invoice model."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    transaction = models.ForeignKey(BankTransaction, on_delete=models.PROTECT, related_name="allocations")
+    document = models.ForeignKey(Document, on_delete=models.PROTECT, related_name="payment_allocations")
+    amount = models.DecimalField(max_digits=20, decimal_places=6)
+    decision = models.CharField(max_length=30)
+    evidence = models.JSONField(default=dict)
+    reason = models.CharField(max_length=1000)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reversed_at = models.DateTimeField(null=True)
+    reversed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="reversed_allocations"
+    )
+    reversal_reason = models.CharField(max_length=1000, blank=True)
+    reversed_by_bank_transaction = models.ForeignKey(
+        BankTransaction, null=True, on_delete=models.PROTECT, related_name="reversed_allocations"
+    )
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_allocation")]
+
+
 class IdempotencyRecord(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     operation = models.CharField(max_length=100)

@@ -461,6 +461,9 @@ def save_result(actor, payload, source="manual"):
             duplicate = get_document(actor, result.duplicate_of)
             if duplicate.id == doc.id or duplicate.company_id != result.company_id:
                 raise DomainError("Ungültige Dublettenverknüpfung.")
+        from .reconciliation import guard_document_change
+
+        guard_document_change(doc, result)
         metadata = result.metadata.model_dump(mode="json")
         issues = validation_issues(
             result.kind, result.company_id, result.period, result.account_id, metadata, doc.parser_error
@@ -541,6 +544,19 @@ def change_document_exclusion(actor, document_id, payload, *, excluded):
             )
         changed = doc.is_excluded != excluded
         if changed:
+            if excluded:
+                from .models import BankTransactionSource, PaymentAllocation
+
+                if (
+                    PaymentAllocation.objects.filter(document=doc).exists()
+                    or BankTransactionSource.objects.filter(document=doc).exists()
+                ):
+                    raise DomainError(
+                        "Finanziell referenzierte Rechnung/Bankquelle kann nicht ausgeschlossen werden. "
+                        "Zahlungshistorie bleibt erhalten; ein ausdrücklicher finanzieller "
+                        "Korrekturworkflow ist erforderlich.",
+                        409,
+                    )
             doc.is_excluded = excluded
             doc.exclusion_reason = command.reason if excluded else ""
             doc.excluded_at = timezone.now() if excluded else None

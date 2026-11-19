@@ -22,6 +22,7 @@ urlpatterns = [
     path("api/documents/<uuid:document_id>/exclude/", api.DocumentExclusion.as_view(), {"excluded": True}),
     path("api/documents/<uuid:document_id>/restore/", api.DocumentExclusion.as_view(), {"excluded": False}),
     path("api/documents/<uuid:document_id>/<str:representation>/", api.DocumentFile.as_view()),
+    path("api/reconciliation/<str:action>/", api.Reconciliation.as_view()),
     path("api/packages/", api.Packages.as_view()),
     path("api/packages/preview/", api.Preview.as_view()),
     path("api/packages/<uuid:package_id>/", api.PackageDetail.as_view()),

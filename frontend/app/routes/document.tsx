@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { ErrorAlert, Heading, Loading, Status } from "../components";
 import { useApp } from "./shell";
+import { PaymentPanel } from "../payments";
 import { DocumentExclusion } from "../document-exclusion";
 import { DocumentName } from "../document-names";
 
@@ -287,6 +288,7 @@ function Editor({ doc }: { doc: Document }) {
           </Accordion>
         </Paper>
         <Stack spacing={2}>
+          {!doc.is_excluded && <PaymentPanel doc={doc} />}
           <Paper
             component="fieldset"
             disabled={!!doc.is_excluded}

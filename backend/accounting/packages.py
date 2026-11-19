@@ -157,6 +157,25 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
             data["account_identifier"] = doc.account.identifier if doc.account_id else ""
             data["category_name"] = doc.category.name if doc.category_id else ""
             included.append(data)
+    from .reconciliation import INVOICE_KINDS, digest, status_for_document
+
+    payments = []
+    previous_payments = {p["document_id"]: p for p in parent.snapshot.get("payments", [])} if parent else {}
+    for doc in docs:
+        if (
+            doc.kind in INVOICE_KINDS
+            and doc.period in periods
+            and not doc.duplicate_of_id
+            and not doc.is_excluded
+        ):
+            payment = {**status_for_document(doc), "period": doc.period}
+            payment["snapshot_revision"] = digest({k: v for k, v in payment.items() if k != "as_of"})
+            payments.append(payment)
+    payment_changes = [
+        p["document_id"]
+        for p in payments
+        if previous_payments.get(p["document_id"], {}).get("snapshot_revision") != p["snapshot_revision"]
+    ]
     inbox, excluded_inbox = [], []
     try:
         actor.require_inbox(actor.user_id)
@@ -174,6 +193,9 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         "recipients": company.recipients,
         "allow_open_issues": company.allow_open_issues,
         "documents": included,
+        "payment_schema_version": 1,
+        "payments": payments,
+        "payment_changes": payment_changes,
         "excluded": excluded,
         "intentional_exclusions": intentional_exclusions,
         "exclusion_changes": exclusion_changes,
@@ -249,6 +271,51 @@ def build_archive(snapshot, package_id, version):
         stream = io.BytesIO()
         wb.save(stream)
         files[f"{base}/Uebersicht.xlsx"] = stream.getvalue()
+        # Separate payment overview also captures payment-only supplements without duplicating originals.
+        payments = [p for p in snapshot.get("payments", []) if p["period"] == period]
+        if payments:
+            columns = [
+                "document_id",
+                "document_version",
+                "as_of",
+                "status",
+                "currency",
+                "gross",
+                "paid",
+                "remaining",
+                "due_date",
+                "overdue",
+                "bank_evidence",
+                "revision",
+            ]
+            payment_text = io.StringIO(newline="")
+            writer = csv.writer(payment_text, delimiter=";")
+            writer.writerow(columns)
+            wb_payments = Workbook()
+            ws_payments = wb_payments.active
+            ws_payments.title = "Zahlungsstand"
+            ws_payments.append(columns)
+            for payment in payments:
+                row = [spreadsheet_safe(payment.get(c)) for c in columns]
+                writer.writerow(row)
+                ws_payments.append(row)
+            files[f"{base}/Zahlungsstand.csv"] = b"\xef\xbb\xbf" + payment_text.getvalue().encode("utf-8")
+            payment_stream = io.BytesIO()
+            wb_payments.save(payment_stream)
+            files[f"{base}/Zahlungsstand.xlsx"] = payment_stream.getvalue()
+            files[f"{base}/Zahlungsstand.json"] = json.dumps(
+                {
+                    "schema_version": 1,
+                    "payments": payments,
+                    "changed_ids": [
+                        p["document_id"]
+                        for p in payments
+                        if p["document_id"] in snapshot.get("payment_changes", [])
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ).encode()
         notes = "\n".join(f"- {e['document']['original_name']}: {e['reason']}" for e in snapshot["excluded"])
         intentional = "\n".join(
             f"- {e['document']['original_name']} ("

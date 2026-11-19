@@ -1,5 +1,6 @@
 """Official MCP SDK v2; all tools call the same domain services as REST."""
 
+import json
 from typing import Any
 
 from asgiref.sync import sync_to_async
@@ -7,13 +8,21 @@ from django.conf import settings
 from django.db import close_old_connections
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Image
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import StrictInt
 
 from . import jobs, mail, name_changes, packages, services, transfers
-from .auth import token_actor
+from .auth import DomainError, token_actor
 from .models import Job
 from .schemas import DocumentResult
+from .payment_schemas import (
+    AllocationRequest,
+    ReconcileRequest,
+    ReverseAllocationRequest,
+    RevokePartyRequest,
+    VerifyPartyRequest,
+)
 
 server = MCPServer(
     "Lazy Accountant",
@@ -40,6 +49,11 @@ async def call(ctx, fn, *args, **kwargs):
         close_old_connections()
         try:
             return fn(actor(ctx), *args, **kwargs)
+        except DomainError as exc:
+            # Expected domain conflicts must be actionable, not masked as SDK crashes.
+            raise ToolError(
+                json.dumps({"status": exc.status, "message": str(exc)}, ensure_ascii=False)
+            ) from exc
         finally:
             close_old_connections()
 
@@ -151,6 +165,92 @@ async def save_document_result(
 ) -> dict[str, Any]:
     """Vollständiges strukturiertes Ergebnis mit Ausgangsversion speichern. Unbekanntes null lassen; approve nur ohne Prüfpunkte."""
     return await call(ctx, services.save_result, result.model_dump(mode="json"), "agent:" + run_id)
+
+
+@server.tool()
+async def reconcile_bank_document(request: ReconcileRequest, ctx: Context) -> dict[str, Any]:
+    """Geprüftes CAMT abgleichen. Eindeutige Rechnungen bestätigen; gebuchte eindeutig referenzierte Vollrückbuchungen berichtigen Deckung auch bei auto_confirm=false. Unklare Bezüge nicht raten."""
+    from .reconciliation import reconcile_document
+
+    return await call(ctx, reconcile_document, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def list_bank_transactions(
+    company_id: int, ctx: Context, cursor: int = 0, limit: int = 50
+) -> dict[str, Any]:
+    """Bankbewegungen mit Quellen, verfügbaren Beträgen und Prüfpunkten paginiert lesen."""
+    from .reconciliation import list_transactions
+
+    return await call(ctx, list_transactions, company_id, cursor, limit)
+
+
+@server.tool()
+async def list_invoice_payment_statuses(
+    company_id: int, ctx: Context, cursor: int = 0, limit: int = 50
+) -> dict[str, Any]:
+    """Offene Posten und Zahlungsstatus für importierte ER/AR paginiert lesen; keine Mahnungen auslösen."""
+    from .reconciliation import list_invoice_statuses
+
+    return await call(ctx, list_invoice_statuses, company_id, cursor, limit)
+
+
+@server.tool()
+async def get_payment_candidates(transaction_id: str, ctx: Context) -> dict[str, Any]:
+    """Erklärbare Rechnungsreferenz-Treffer lesen; Betrag allein belegt keine Zahlung."""
+    from .reconciliation import candidates
+
+    return await call(ctx, candidates, transaction_id)
+
+
+@server.tool()
+async def get_invoice_payment_status(
+    document_id: str, ctx: Context, as_of: str | None = None
+) -> dict[str, Any]:
+    """ER-/AR-Zahlungen, Restbetrag, Überfälligkeit und Bankdeckung getrennt lesen."""
+    from .reconciliation import payment_status
+
+    return await call(ctx, payment_status, document_id, as_of)
+
+
+@server.tool()
+async def confirm_payment_allocation(request: AllocationRequest, ctx: Context) -> dict[str, Any]:
+    """Gebuchte Bankbewegung manuell ganz oder teilweise zuordnen; Versionen und Begründung erforderlich."""
+    from .reconciliation import allocate
+
+    return await call(ctx, allocate, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def reverse_payment_allocation(request: ReverseAllocationRequest, ctx: Context) -> dict[str, Any]:
+    """Zuordnung nachvollziehbar aufheben, ohne Historie oder Originale zu löschen."""
+    from .reconciliation import reverse_allocation
+
+    return await call(ctx, reverse_allocation, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def list_verified_bank_parties(company_id: int, ctx: Context) -> list[dict]:
+    """Aktive explizite Bankdatenfreigaben innerhalb einer Firma lesen."""
+    from .reconciliation import list_verified_parties
+
+    return await call(ctx, list_verified_parties, company_id)
+
+
+@server.tool()
+async def revoke_bank_party(request: RevokePartyRequest, ctx: Context) -> dict[str, Any]:
+    """Admin widerruft eine Bankdatenfreigabe für künftige automatische Zuordnungen; Historie bleibt erhalten."""
+    from .reconciliation import revoke_party
+
+    return await call(ctx, revoke_party, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def verify_bank_party(request: VerifyPartyRequest, ctx: Context) -> dict[str, Any]:
+    """Admin bestätigt bekannte Gegenpartei/IBAN für automatische Zuordnung; niemals aus PDF automatisch übernehmen."""
+    from .reconciliation import verify_party
+
+    return await call(ctx, verify_party, **request.model_dump(mode="json"))
 
 
 @server.tool()
