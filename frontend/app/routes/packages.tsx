@@ -298,10 +298,48 @@ export default function Packages() {
               aufgenommen.
             </Alert>
           )}
+          {!!shown.intentional_exclusions?.length && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <strong>
+                Bewusst ausgeschlossene Nichtbelege (nicht blockierend)
+              </strong>
+              {shown.intentional_exclusions.map((e) => (
+                <Box key={e.document.id}>
+                  <Link to={`/documents/${e.document.id}`}>
+                    {e.document.original_name}
+                  </Link>
+                  {` · ${e.document.period || "ohne Monatszuordnung"}: ${e.reason}`}
+                </Box>
+              ))}
+            </Alert>
+          )}
+          {!!shown.excluded_inbox?.length && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {shown.excluded_inbox.length} ausgeschlossene Nichtbelege in Ihrer
+              persönlichen Inbox (nicht blockierend, nicht in diesem
+              Firmenexport enthalten).
+            </Alert>
+          )}
+          {!!shown.exclusion_changes?.length && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <strong>
+                Ausschluss-/Wiederherstellungsänderungen zum Vorgänger
+              </strong>
+              {shown.exclusion_changes.map((e) => (
+                <Box key={e.document_id}>
+                  <Link to={`/documents/${e.document_id}`}>
+                    {e.original_name}
+                  </Link>
+                  {` · ${e.action === "exclude" ? "Ausgeschlossen" : "Wiederhergestellt"} · v${e.old_revision} → v${e.new_revision}: ${e.reason}`}
+                </Box>
+              ))}
+              Bereits erstellte Pakete und Versandaufträge bleiben unverändert.
+            </Alert>
+          )}
           {(shown.excluded.length > 0 || shown.unassigned_inbox.length > 0) && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               <strong>Offene Punkte bleiben sichtbar.</strong>{" "}
-              {shown.excluded.length} ausgeschlossene Dokumente und{" "}
+              {shown.excluded.length} prüfbedingt ausgeschlossene Dokumente und{" "}
               {shown.unassigned_inbox.length} Dokumente ohne Firmenzuordnung.{" "}
               {shown.allow_open_issues
                 ? "Versandregel erlaubt offene Punkte."

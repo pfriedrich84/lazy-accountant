@@ -5,8 +5,10 @@ import uuid
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from pydantic import ValidationError
 
 from . import naming, storage
@@ -19,9 +21,11 @@ from .models import (
     FileOperation,
     IdempotencyRecord,
     Membership,
+    PackageItem,
+    ProcessingClaim,
     Revision,
 )
-from .schemas import DocumentResult, validation_issues
+from .schemas import DocumentExclusionCommand, DocumentResult, validation_issues
 
 
 def validate_original_filename(name):
@@ -144,16 +148,16 @@ def get_document(actor, document_id, permission="read", lock=False):
 
 def document_data(d, detailed=False, names=None):
     desired = storage.desired_path(d)
-    pending = d.filed_path != desired
-    filing_error = ""
-    if pending:
-        filing_error = (
-            FileOperation.objects.filter(document=d, status="pending")
-            .order_by("-id")
-            .values_list("error", flat=True)
-            .first()
-            or ""
-        )
+    current_operation = (
+        FileOperation.objects.filter(document=d, version=d.version, status="pending")
+        .only("error")
+        .order_by("-id")
+        .first()
+    )
+    # A fast restore can already point at the desired file while cleanup of an
+    # earlier published exclusion target is still pending. Do not report done.
+    pending = d.filed_path != desired or current_operation is not None
+    filing_error = current_operation.error if current_operation else ""
     result = {
         "id": str(d.id),
         "company_id": d.company_id,
@@ -173,6 +177,10 @@ def document_data(d, detailed=False, names=None):
         "security_error": d.security_error,
         "scanned_sha256": d.scanned_sha256,
         "scanned_at": d.scanned_at.isoformat() if d.scanned_at else None,
+        "is_excluded": d.is_excluded,
+        "exclusion_reason": d.exclusion_reason,
+        "excluded_at": d.excluded_at.isoformat() if d.excluded_at else None,
+        "excluded_by_id": d.excluded_by_id,
         "version": d.version,
         "filed_path": d.filed_path,
         "duplicate_of": str(d.duplicate_of_id) if d.duplicate_of_id else None,
@@ -193,9 +201,18 @@ def document_data(d, detailed=False, names=None):
                     for x in d.referenced_by.filter(company_id=d.company_id).values_list("id", flat=True)
                 ],
                 "sources": list(d.sources.values("id", "provenance", "error", "created_at")),
+                "packaged_in": [
+                    {"id": str(item.package_id), "version": item.package.version, "revision": item.revision}
+                    for item in PackageItem.objects.filter(
+                        document=d,
+                        package__company_id=d.company_id,
+                    )
+                    .select_related("package")
+                    .order_by("package__version")
+                ],
                 "revisions": list(
                     d.revisions.order_by("-version").values(
-                        "version", "base_version", "actor_id", "source", "snapshot", "created_at"
+                        "version", "base_version", "actor_id", "source", "reason", "snapshot", "created_at"
                     )
                 ),
             }
@@ -238,7 +255,10 @@ def list_documents(
     category_id=None,
     cursor=None,
     limit=50,
+    exclusion="active",
 ):
+    if exclusion not in {"active", "excluded", "all"}:
+        raise DomainError("Ausschlussfilter muss active, excluded oder all sein.")
     qs = Document.objects.filter(company__in=actor.companies())
     try:
         actor.require_inbox(actor.user_id)
@@ -252,6 +272,8 @@ def list_documents(
     elif company_id:
         actor.require(company_id)
         qs = qs.filter(company_id=company_id)
+    if exclusion != "all":
+        qs = qs.filter(is_excluded=exclusion == "excluded")
     if period:
         qs = qs.filter(period=valid_period(period))
     if status:
@@ -406,6 +428,10 @@ def save_result(actor, payload, source="manual"):
                 409,
                 {"current_version": doc.version},
             )
+        if doc.is_excluded:
+            raise DomainError("Dokument ist ausgeschlossen. Zuerst ausdrücklich wiederherstellen.", 409)
+        if doc.company_id != initial.company_id:
+            raise DomainError("Firmenzuordnung wurde inzwischen geändert. Neu laden.", 409)
         if result.company_id:
             actor.require(result.company_id, "process")
         else:
@@ -482,6 +508,132 @@ def save_result(actor, payload, source="manual"):
     return document_data(doc, True)
 
 
+def change_document_exclusion(actor, document_id, payload, *, excluded):
+    """Reversible domain action; retries replay their original result, never a new action.
+
+    The user/company/document lock order matches ingest/save_result. Authorization
+    is always rechecked, including when replaying an idempotency receipt.
+    """
+    try:
+        command = DocumentExclusionCommand.model_validate(payload)
+    except ValidationError as e:
+        raise DomainError(
+            "Ungültiger Ausschlussauftrag.", details=json.loads(e.json(include_input=False))
+        ) from e
+    initial = get_document(actor, document_id, "process")
+    operation = "document.exclude" if excluded else "document.restore"
+    request_hash = storage.checksum(
+        json.dumps(
+            [str(initial.id), operation, command.model_dump(mode="json")],
+            sort_keys=True,
+        ).encode()
+    )
+    with transaction.atomic():
+        get_user_model().objects.select_for_update().get(id=actor.user_id)
+        if initial.company_id:
+            Company.objects.select_for_update().get(id=initial.company_id)
+        doc = get_document(actor, document_id, "process", lock=True)
+        prior = IdempotencyRecord.objects.filter(
+            actor_id=actor.user_id,
+            operation=operation,
+            key=command.idempotency_key,
+        ).first()
+        if prior:
+            if prior.request_hash != request_hash:
+                raise DomainError("Idempotenzschlüssel gehört zu einer anderen Anfrage.", 409)
+            if doc.security_status != "clean":
+                # Keep the original business receipt, but never replay extracted
+                # content or an obsolete clean status after a later revocation.
+                replay = json.loads(json.dumps(prior.result))
+                safe = document_data(doc, True)
+                for key in (
+                    "metadata",
+                    "issues",
+                    "parser_result",
+                    "parser_error",
+                    "revisions",
+                    "filed_path",
+                    "handover_name",
+                    "proposed_name",
+                    "effective_name",
+                    "name_warning",
+                    "name_source",
+                    "security_status",
+                    "security_error",
+                    "scanned_sha256",
+                    "scanned_at",
+                    "scans",
+                    "security_impact",
+                ):
+                    replay["document"][key] = safe.get(key)
+                return json.loads(json.dumps(replay, cls=DjangoJSONEncoder))
+            return prior.result
+        if doc.company_id != initial.company_id:
+            raise DomainError("Firmenzuordnung wurde inzwischen geändert. Neu laden.", 409)
+        if doc.version != command.base_version:
+            raise DomainError(
+                "Dokument wurde inzwischen geändert. Neu laden und vergleichen.",
+                409,
+                {"current_version": doc.version},
+            )
+        changed = doc.is_excluded != excluded
+        if changed:
+            doc.is_excluded = excluded
+            doc.exclusion_reason = command.reason if excluded else ""
+            doc.excluded_at = timezone.now() if excluded else None
+            doc.excluded_by_id = actor.user_id if excluded else None
+            if not excluded:
+                doc.issues = validation_issues(
+                    doc.kind,
+                    doc.company_id,
+                    doc.period,
+                    doc.account_id,
+                    doc.metadata,
+                    doc.parser_error,
+                )
+                if doc.issues and doc.status == "ready":
+                    doc.status = "review"
+            doc.version += 1
+            doc.save()
+            Revision.objects.create(
+                document=doc,
+                version=doc.version,
+                base_version=command.base_version,
+                actor_id=actor.user_id,
+                source="exclude" if excluded else "restore",
+                reason=command.reason,
+                snapshot=document_data(doc),
+            )
+            # Any cooperative claim refers to the old version. Old results will
+            # fail base_version; a new claim must not be blocked by a stale one.
+            ProcessingClaim.objects.filter(document=doc).delete()
+            storage.journal(doc)
+        result = json.loads(
+            json.dumps(
+                {"document": document_data(doc, True), "changed": changed},
+                cls=DjangoJSONEncoder,
+            )
+        )
+        receipt = IdempotencyRecord.objects.create(
+            actor_id=actor.user_id,
+            operation=operation,
+            key=command.idempotency_key,
+            request_hash=request_hash,
+            result=result,
+        )
+    storage.reconcile(doc.id)
+    doc.refresh_from_db()
+    if doc.version == result["document"]["version"]:
+        # Freeze the committed domain state. A concurrent restore may already
+        # have happened after commit; never replace an exclude receipt with
+        # that newer state. Only enrich filing diagnostics for the same version.
+        filing = document_data(doc)
+        for key in ("filed_path", "desired_path", "filing_status", "filing_error"):
+            result["document"][key] = filing[key]
+    IdempotencyRecord.objects.filter(id=receipt.id).update(result=result)
+    return result
+
+
 def duplicate_hints(actor, document_id):
     doc = get_document(actor, document_id)
     if not doc.company_id:
@@ -502,6 +654,8 @@ def duplicate_hints(actor, document_id):
                     if other.sha256 == doc.sha256
                     else "Gleicher Aussteller und Belegnummer",
                     "status": other.status,
+                    "is_excluded": other.is_excluded,
+                    "exclusion_reason": other.exclusion_reason,
                 }
             )
     return hints

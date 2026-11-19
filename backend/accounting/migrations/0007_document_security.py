@@ -7,7 +7,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("accounting", "0005_document_handover_name_document_name_source"),
+        ("accounting", "0006_document_exclusion"),
     ]
 
     operations = [

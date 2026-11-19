@@ -171,6 +171,11 @@ export interface Document {
   issues: string[];
   status: string;
   version: number;
+  is_excluded?: boolean;
+  exclusion_reason?: string;
+  excluded_at?: string | null;
+  excluded_by_id?: number | null;
+  packaged_in?: { id: string; version: number; revision: number }[];
   filed_path: string;
   security_status: "pending" | "scanning" | "clean" | "infected" | "error";
   security_error: string;
@@ -190,6 +195,7 @@ export interface Document {
     version: number;
     actor_id: number;
     source: string;
+    reason?: string;
     created_at: string;
   }[];
 }
@@ -223,6 +229,18 @@ export interface Preview {
     document_id: string | null;
     error: string;
     security_status: string;
+  }[];
+  schema_version?: number;
+  intentional_exclusions?: { document: Document; reason: string }[];
+  excluded_inbox?: string[];
+  exclusion_changes?: {
+    document_id: string;
+    original_name: string;
+    old_revision: number;
+    new_revision: number;
+    action: "exclude" | "restore";
+    reason: string;
+    previous_package_id: string;
   }[];
   unassigned_inbox: string[];
   unchanged: string[];
