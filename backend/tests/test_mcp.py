@@ -16,11 +16,11 @@ from mcp.client.streamable_http import streamable_http_client
 from accounting import jobs, storage
 from accounting.auth import issue_token
 from accounting.demo import sample_camt, sample_image, sample_pdf
-from accounting.models import Account, Document
+from accounting.models import Account, Document, Job, Mailbox
 
 
-@pytest.fixture
-def mcp_url(transactional_db):
+@pytest.fixture(scope="module")
+def mcp_url(django_db_setup):
     from config.asgi import application
 
     sock = socket.socket()
@@ -285,3 +285,42 @@ def test_real_streamable_http_month_and_skill_contract(mcp_url, actor, companies
     with patch("accounting.jobs._publish"):
         asyncio.run(scenario())
     assert Document.objects.count() == 7
+
+
+@pytest.mark.django_db(transaction=True)
+def test_explicit_mcp_imap_works_with_checkbox_off_but_requires_process_scope(mcp_url, actor, companies):
+    company = companies[0]
+    mailbox = Mailbox.objects.create(company=company, enabled=False)
+    token = issue_token(actor, "manual-imap", [company.id], ["read", "process"])["token"]
+    readonly = issue_token(actor, "no-imap", [company.id], ["read"])["token"]
+
+    async def scenario():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                response = await client.call_tool(
+                    "start_imap_import", {"company_id": company.id, "idempotency_key": "explicit-mcp"}
+                )
+                assert not response.is_error
+                job_id = response.structured_content["id"]
+                result = await sync_to_async(jobs.run_job)(job_id)
+                assert result["status"] == "done" and result["result"]["messages"] == 0
+                await sync_to_async(Job.objects.filter(id=job_id).update)(status="failed")
+                response = await client.call_tool("resume_job", {"job_id": job_id})
+                assert not response.is_error
+                result = await sync_to_async(jobs.run_job)(job_id)
+                assert result["status"] == "done"
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + readonly}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                denied = await client.call_tool(
+                    "start_imap_import", {"company_id": company.id, "idempotency_key": "forbidden-mcp"}
+                )
+                assert denied.is_error
+
+    with (
+        patch("accounting.jobs._publish"),
+        patch("accounting.mail.scan_mailbox", return_value={"messages": 0, "remaining": 0}) as scan,
+    ):
+        asyncio.run(scenario())
+    assert scan.call_count == 2 and Job.objects.filter(kind="imap").count() == 1
+    mailbox.refresh_from_db()
+    assert not mailbox.enabled

@@ -1,5 +1,6 @@
 """Django-Q2 handles transport; these rows guard business side effects and resumption."""
 
+import hashlib
 import json
 import logging
 from datetime import timedelta
@@ -72,7 +73,13 @@ def run_job(job_id):
         if job.kind == "imap":
             from .mail import scan_mailbox
 
-            result = scan_mailbox(job)
+            if (
+                job.payload.get("nightly_date")
+                and not Mailbox.objects.filter(company_id=job.company_id, enabled=True).exists()
+            ):
+                result = {"skipped": "Nächtlicher Abruf inzwischen deaktiviert."}
+            else:
+                result = scan_mailbox(job)
         elif job.kind == "package":
             from .packages import create_package
 
@@ -100,7 +107,28 @@ def run_job(job_id):
         )
         logger.error("Job %s failed (%s)", job.id, type(e).__name__)
     job.finished_at = timezone.now()
-    job.save(update_fields=["status", "result", "error", "finished_at"])
+    with transaction.atomic():
+        job.save(update_fields=["status", "result", "error", "finished_at"])
+        # One nightly import may need several bounded scans. Persist the next
+        # batch atomically with completion, so a worker restart cannot lose it.
+        if (
+            job.kind == "imap"
+            and job.status == "done"
+            and job.payload.get("nightly_date")
+            and job.result.get("remaining", 0) > 0
+            and job.result.get("messages", 0) > 0
+            and Mailbox.objects.filter(company_id=job.company_id, enabled=True).exists()
+        ):
+            cursor = json.dumps(
+                [job.payload["nightly_date"], job.result["uidvalidity"], job.result["last_uid"]]
+            )
+            key = "nightly-batch:" + hashlib.sha256(cursor.encode()).hexdigest()
+            payload = {
+                **job.payload,
+                "until_uid": job.result["snapshot_uid"],
+                "snapshot_uidvalidity": job.result["uidvalidity"],
+            }
+            enqueue_job(Actor(job.actor_id), job.company_id, "imap", key, payload)
     return job_data(job)
 
 
@@ -160,7 +188,12 @@ def maintenance():
             job.save(update_fields=["status", "error"])
     for job_id in Job.objects.filter(status="queued").exclude(kind="agent").values_list("id", flat=True):
         _publish(job_id)
-    # Technical mail polling only. There is deliberately no monthly scheduler.
+    # Technical upkeep remains minutely; IMAP starts only once per local night.
+    # A one-hour start window tolerates scheduler delays without daytime catch-up.
+    local_now = timezone.localtime(timezone.now(), timezone.get_default_timezone())
+    if local_now.hour != 3:
+        return
+    nightly_date = local_now.date().isoformat()
     for mailbox in Mailbox.objects.filter(enabled=True):
         if Job.objects.filter(
             company_id=mailbox.company_id, kind="imap", status__in=["queued", "running"]
@@ -173,7 +206,11 @@ def maintenance():
         )
         if user_id:
             enqueue_job(
-                Actor(user_id), mailbox.company_id, "imap", "poll:" + timezone.now().strftime("%Y%m%d%H%M")
+                Actor(user_id),
+                mailbox.company_id,
+                "imap",
+                "nightly:" + nightly_date,
+                {"nightly_date": nightly_date},
             )
 
 

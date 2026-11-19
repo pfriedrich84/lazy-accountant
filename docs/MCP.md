@@ -1,5 +1,9 @@
 # MCP-Vertrag und Orca-Anbindung
 
+## IMAP-Abruf und Automatik
+
+Die Postfach-Checkbox `enabled` steuert **nur die automatische nächtliche Abholung**. Ohne Haken startet kein Nachtabruf; wartende automatische Aufträge werden beim Ausführen übersprungen. Ein ausdrücklicher `start_imap_import`-Aufruf mit `process`-Berechtigung ist auch bei ausgeschalteter Automatik erlaubt, ebenso der UI-Knopf „IMAP jetzt abrufen“. Manuelle Abrufe und das Fortsetzen manueller Aufträge setzen den Haken nicht. IMAP-Zugang und Importbeginn müssen weiterhin korrekt eingerichtet sein.
+
 ## Transport und Authentifizierung
 
 Offizielles `modelcontextprotocol/python-sdk` **2.3.0**, `MCPServer`, Streamable HTTP, ASGI-Mount **`/mcp/`**. Der übergeordnete ASGI-Lifecycle startet/beendet `server.session_manager.run()`. Stateless HTTP mit JSON-Antworten; kein zweiter Datenbestand und keine eigenen JSON-RPC-Implementierungen.

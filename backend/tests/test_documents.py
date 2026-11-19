@@ -47,6 +47,29 @@ def test_exact_original_and_folders(actor, companies):
     assert storage.read_original(Document.objects.get(id=d["id"])) == data
 
 
+@pytest.mark.parametrize("prefix_size", [0, 311, 1019])
+def test_bank_pdf_with_control_prefix_keeps_original(actor, companies, prefix_size):
+    prefix = (b"ZV/F16;MAND;;3;198;DPNR;;11;84817806601;" * 32)[:prefix_size]
+    data = prefix + sample_pdf(["ERTRAGS- UND TILGUNGSBELEG"])
+    name = "DE000A0F5UH1_CONFIRMATION_OF_INCOME_REDEMPTION_2026-10-15 (1).pdf"
+    d = services.ingest(actor, name, data, companies[0].id)["document"]
+    doc = Document.objects.get(id=d["id"])
+    assert d["media_type"] == "application/pdf"
+    assert d["original_name"] == name
+    assert doc.parser_result["pages"] == 1
+    assert not doc.parser_error
+    assert storage.read_original(doc) == data
+    assert doc.sha256 == storage.checksum(data)
+    assert storage.path(d["filed_path"]).read_bytes() == data
+    assert services.ingest(actor, name, data, companies[0].id)["duplicate"]
+
+
+@pytest.mark.parametrize("data", [b"not a PDF", b"x" * 1020 + b"%PDF-1.7", b"x" * 1024 + b"%PDF-1.7"])
+def test_pdf_extension_does_not_bypass_header_check(data):
+    with pytest.raises(DomainError, match="Unterstützt sind"):
+        services.detect_media(data, "statement (1).pdf")
+
+
 def test_same_name_and_company_scoped_dedup(actor, companies):
     a, b = companies
     data = sample_pdf(["same"])
