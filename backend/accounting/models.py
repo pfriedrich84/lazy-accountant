@@ -111,6 +111,12 @@ class Document(models.Model):
     company = models.ForeignKey(Company, null=True, blank=True, on_delete=models.PROTECT)
     inbox_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     original_name = models.CharField(max_length=255)
+    handover_name = models.CharField(max_length=255, blank=True)
+    name_source = models.CharField(
+        max_length=10,
+        blank=True,
+        choices=[("generated", "Generiert"), ("manual", "Manuell"), ("fallback", "Originalname")],
+    )
     original_path = models.CharField(max_length=400)
     filed_path = models.CharField(max_length=400, blank=True)
     sha256 = models.CharField(max_length=64, db_index=True)
