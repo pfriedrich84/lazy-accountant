@@ -1,0 +1,30 @@
+html {
+  color-scheme: light;
+}
+body {
+  margin: 0;
+}
+a {
+  color: #175b50;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+::selection {
+  background: #c9e8de;
+}
+.preview-page {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: auto;
+  box-shadow: 0 3px 16px #102c2417;
+}
+.file-path {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}

@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.venv
+var
+backups
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+frontend/build
+frontend/.react-router
+frontend/test-results
+frontend/playwright-report
