@@ -10,6 +10,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -56,7 +57,7 @@ def money(value, currency):
 
 
 def _invoice(doc):
-    if doc.kind not in INVOICE_KINDS or not doc.company_id or doc.duplicate_of_id:
+    if doc.kind not in INVOICE_KINDS or not doc.company_id or doc.duplicate_of_id or doc.is_excluded:
         raise DomainError("Aktive Ein- oder Ausgangsrechnung erforderlich.")
     currency = doc.metadata.get("currency")
     amount = money(doc.metadata.get("gross"), currency)
@@ -194,7 +195,7 @@ def list_invoice_statuses(actor, company_id, cursor=0, limit=50):
         raise DomainError("Ungültige Seitengröße/Position.")
     rows = list(
         Document.objects.filter(
-            company_id=company_id, kind__in=INVOICE_KINDS, duplicate_of__isnull=True
+            company_id=company_id, kind__in=INVOICE_KINDS, duplicate_of__isnull=True, is_excluded=False
         ).order_by("id")[cursor : cursor + limit + 1]
     )
     return {
@@ -231,6 +232,7 @@ def _record(actor, op, key, fingerprint, result):
 
 def _lock_company(actor, company_id):
     actor.require(company_id, "process")
+    get_user_model().objects.select_for_update().get(id=actor.user_id)
     return Company.objects.select_for_update().get(id=company_id)
 
 
@@ -248,6 +250,7 @@ def verify_party(actor, company_id, name, iban, reason):
     if int(numeric) % 97 != 1:
         raise DomainError("IBAN-Prüfsumme ungültig.")
     with transaction.atomic():
+        get_user_model().objects.select_for_update().get(id=actor.user_id)
         Company.objects.select_for_update().get(id=company_id)
         obj, _ = VerifiedBankParty.objects.get_or_create(
             company_id=company_id,
@@ -273,6 +276,7 @@ def revoke_party(actor, company_id, party_id, reason):
     if not reason.strip() or len(reason) > 1000:
         raise DomainError("Begründung erforderlich (max. 1000 Zeichen).")
     with transaction.atomic():
+        get_user_model().objects.select_for_update().get(id=actor.user_id)
         Company.objects.select_for_update().get(id=company_id)
         party = VerifiedBankParty.objects.filter(id=party_id, company_id=company_id).first()
         if not party:
@@ -395,8 +399,12 @@ def _apply_bank_reversals(actor, company_id):
 
 
 def _candidate_rows(tx):
+    if tx.sources.filter(document__is_excluded=True).exists():
+        return []
     kind = "outgoing_invoice" if tx.direction == "CRDT" else "incoming_invoice"
-    docs = Document.objects.filter(company_id=tx.company_id, kind=kind, duplicate_of__isnull=True)
+    docs = Document.objects.filter(
+        company_id=tx.company_id, kind=kind, duplicate_of__isnull=True, is_excluded=False
+    )
     results = []
     for doc in docs.order_by("id"):
         reference = doc.metadata.get("number") or ""
@@ -483,6 +491,8 @@ def candidates(actor, transaction_id):
 
 
 def _allocate(actor, tx, doc, amount, decision, reason):
+    if doc.is_excluded or tx.sources.filter(document__is_excluded=True).exists():
+        raise DomainError("Ausgeschlossene Rechnung/Bankquelle kann keine neue Zahlung belegen.", 409)
     gross, currency = _invoice(doc)
     if currency != tx.currency or tx.direction != ("CRDT" if doc.kind == "outgoing_invoice" else "DBIT"):
         raise DomainError("Richtung oder Währung passt nicht zur Rechnung.")
@@ -615,6 +625,7 @@ def reconcile_document(actor, document_id, base_version, idempotency_key, auto_c
             or doc.status != "ready"
             or doc.issues
             or doc.duplicate_of_id
+            or doc.is_excluded
         ):
             raise DomainError("Geprüftes CAMT-Dokument mit Bankkonto erforderlich.")
         own = doc.account.identifier.replace(" ", "").upper()

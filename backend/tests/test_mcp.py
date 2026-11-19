@@ -443,6 +443,18 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                 )
                 assert status["status"] == "partially_paid" and status["overdue"]
                 assert status["allocations"][0]["evidence"]["document_version"] == inv["version"]
+                for source in (inv, doc):
+                    denied = await client.call_tool(
+                        "exclude_document",
+                        {
+                            "document_id": source["id"],
+                            "base_version": source["version"],
+                            "reason": "Finanzreferenz darf nicht verschwinden",
+                            "idempotency_key": "exclude-financial-" + source["id"],
+                        },
+                    )
+                    assert denied.is_error
+                    assert "Korrekturworkflow" in str(denied)
                 await call(
                     "reverse_payment_allocation",
                     {
@@ -471,3 +483,74 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
     asyncio.run(scenario())
     assert BankTransaction.objects.count() == 1
     assert PaymentAllocation.objects.get().reversed_at
+
+
+@pytest.mark.django_db(transaction=True)
+def test_real_mcp_exclusion_restore_and_rest_share_contract(mcp_url, actor, companies):
+    from accounting import services
+
+    company = companies[0]
+    doc = services.ingest(actor, "image001.png", sample_image(), company.id)["document"]
+    token = issue_token(actor, "exclusions", [company.id], ["read", "process"])["token"]
+    readonly = issue_token(actor, "readonly", [company.id], ["read"])["token"]
+    arguments = {
+        "document_id": doc["id"],
+        "base_version": 1,
+        "reason": "Sichtbar reine Signaturgrafik",
+        "idempotency_key": "exclude-http",
+    }
+
+    async def scenario():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+
+                async def call(name, args):
+                    response = await client.call_tool(name, args)
+                    assert not response.is_error, response
+                    data = response.structured_content
+                    return data["result"] if data and set(data) == {"result"} else data
+
+                excluded = await call("exclude_document", arguments)
+                assert excluded["changed"] and excluded["document"]["is_excluded"]
+                assert await call("exclude_document", arguments) == excluded
+                assert (await call("list_documents", {"company_id": company.id}))["total"] == 0
+                listing = await call("list_documents", {"company_id": company.id, "exclusion": "excluded"})
+                assert listing["total"] == 1
+                detail = await call("get_document", {"document_id": doc["id"]})
+                assert detail["exclusion_reason"] == arguments["reason"]
+                assert (
+                    await http.get(mcp_url + f"/api/documents/{doc['id']}/original/")
+                ).content == sample_image()
+                # REST rejects stale versions, then restores the same MCP-created exclusion.
+                body = {
+                    "base_version": 1,
+                    "reason": "Restore through REST",
+                    "idempotency_key": "restore-http",
+                }
+                url = mcp_url + f"/api/documents/{doc['id']}/restore/"
+                assert (await http.post(url, json=body)).status_code == 409
+                body["base_version"] = detail["version"]
+                response = await http.post(url, json=body)
+                assert response.status_code == 200 and not response.json()["document"]["is_excluded"]
+                # An old exclusion retry must never undo the restore.
+                assert await call("exclude_document", arguments) == excluded
+                assert not (await call("get_document", {"document_id": doc["id"]}))["is_excluded"]
+                noop = await call(
+                    "restore_document",
+                    {
+                        "document_id": doc["id"],
+                        "base_version": 3,
+                        "reason": "Already restored",
+                        "idempotency_key": "restore-noop",
+                    },
+                )
+                assert not noop["changed"]
+                for invalid in ({"reason": "  "}, {"base_version": True}, {"base_version": "1"}):
+                    denied = await client.call_tool("exclude_document", {**arguments, **invalid})
+                    assert denied.is_error
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + readonly}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                assert (await client.call_tool("exclude_document", arguments)).is_error
+
+    asyncio.run(scenario())
+    assert Document.objects.get(id=doc["id"]).revisions.count() == 3

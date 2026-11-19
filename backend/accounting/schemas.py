@@ -104,6 +104,24 @@ class Metadata(BaseModel):
         return self
 
 
+class DocumentExclusionCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    base_version: int = Field(ge=1, strict=True)
+    reason: str = Field(min_length=1, max_length=1000)
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+    @field_validator("reason", "idempotency_key")
+    @classmethod
+    def safe_text(cls, value):
+        if "\x00" in value:
+            raise ValueError("Nullbyte ist nicht erlaubt.")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as e:
+            raise ValueError("Ungültiges Unicode.") from e
+        return value
+
+
 class DocumentResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     document_id: str

@@ -1,5 +1,6 @@
 """Official MCP SDK v2; all tools call the same domain services as REST."""
 
+import json
 from typing import Any
 
 from asgiref.sync import sync_to_async
@@ -7,10 +8,12 @@ from django.conf import settings
 from django.db import close_old_connections
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context, Image
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import StrictInt
 
 from . import jobs, mail, name_changes, packages, services, transfers
-from .auth import token_actor
+from .auth import DomainError, token_actor
 from .models import Job
 from .schemas import DocumentResult
 from .payment_schemas import (
@@ -46,6 +49,11 @@ async def call(ctx, fn, *args, **kwargs):
         close_old_connections()
         try:
             return fn(actor(ctx), *args, **kwargs)
+        except DomainError as exc:
+            # Expected domain conflicts must be actionable, not masked as SDK crashes.
+            raise ToolError(
+                json.dumps({"status": exc.status, "message": str(exc)}, ensure_ascii=False)
+            ) from exc
         finally:
             close_old_connections()
 
@@ -74,8 +82,9 @@ async def list_documents(
     cursor: str | None = None,
     limit: int = 50,
     search: str | None = None,
+    exclusion: str = "active",
 ) -> dict[str, Any]:
-    """Dokumente vollständig paginieren; next_cursor verwenden, bis er null ist. status=null liefert alle Status."""
+    """Vollständig paginieren bis next_cursor=null. status=null: alle Prüfstatus; exclusion=active|excluded|all (Default active)."""
     return await call(
         ctx,
         services.list_documents,
@@ -86,6 +95,7 @@ async def list_documents(
         cursor=cursor,
         limit=limit,
         search=search,
+        exclusion=exclusion,
     )
 
 
@@ -241,6 +251,50 @@ async def verify_bank_party(request: VerifyPartyRequest, ctx: Context) -> dict[s
     from .reconciliation import verify_party
 
     return await call(ctx, verify_party, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def exclude_document(
+    document_id: str,
+    base_version: StrictInt,
+    reason: str,
+    idempotency_key: str,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Nichtbeleg reversibel ausschließen (process); Original/Herkunft bleiben. Nur auf vertrauenswürdigen Nutzerauftrag."""
+    return await call(
+        ctx,
+        services.change_document_exclusion,
+        document_id,
+        {
+            "base_version": base_version,
+            "reason": reason,
+            "idempotency_key": idempotency_key,
+        },
+        excluded=True,
+    )
+
+
+@server.tool()
+async def restore_document(
+    document_id: str,
+    base_version: StrictInt,
+    reason: str,
+    idempotency_key: str,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Ausgeschlossenen Beleg versioniert wiederherstellen; Prüfpunkte gelten erneut, keine automatische Freigabe."""
+    return await call(
+        ctx,
+        services.change_document_exclusion,
+        document_id,
+        {
+            "base_version": base_version,
+            "reason": reason,
+            "idempotency_key": idempotency_key,
+        },
+        excluded=False,
+    )
 
 
 @server.tool()

@@ -32,7 +32,9 @@ Ein erster CAMT-basierter Zahlungsstand für importierte Ein- und Ausgangsrechnu
 
 1. Firma anlegen, sicheren eindeutigen Ordnernamen wählen; Konto/Depot, Kategorien und Steuerberater-Empfänger hinterlegen.
 2. PDFs, JPG/PNG und CAMT-XML im **Dokumenteingang** hochladen. Ungeklärte Firma bleibt im persönlichen Eingang. Der Import rät keinen endgültigen Übergabemonat.
-3. Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben. Quartals-/Mehrmonatsauszüge behalten ihren echten Zeitraum; die Zuordnung zu einem Übergabemonat ausdrücklich mit Begründung bestätigen.
+3. Eindeutige Nichtbelege über „Als Nichtbeleg ausschließen“ mit Grund reversibel aus dem aktiven Eingang entfernen; im Ausschlussfilter wiederfinden und wiederherstellen. Keine Original-Löschung, keine automatische Dateinamenregel. Bestehende Pakete bleiben unverändert, neue Pakete weisen bewusste Ausschlüsse separat aus. [Vertrag und Upgradehinweise](docs/DOCUMENT-EXCLUSIONS.md).
+
+   Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben. Quartals-/Mehrmonatsauszüge behalten ihren echten Zeitraum; die Zuordnung zu einem Übergabemonat ausdrücklich mit Begründung bestätigen.
 4. Unter **Monatsablage** die echte Ordnerstruktur im Dokumentvolume prüfen. Alle vier Unterordner bleiben erhalten:
 
    ```text
@@ -141,6 +143,7 @@ ADMIN_PASSWORD='<lokales Passwort>' npm run test:browser
 ## Betrieb, Datensicherheit und Grenzen
 
 - **[Betrieb und Backup/Restore](docs/OPERATIONS.md)**: gemeinsame Offline-Sicherung von PostgreSQL, Originalen, Snapshots, Mailteilen und Schlüssel; Integritätsprüfung und sicherer Wiederanlauf.
+- **[Reversibler Nichtbeleg-Ausschluss](docs/DOCUMENT-EXCLUSIONS.md)**: MCP/REST, UI, Rechte, Idempotenz, Paket-/Nachtragsverhalten und Migration/Rollback.
 - **[CAMT-Unterstützung](docs/CAMT.md)**: explizite Namespaces, sichere XML-Verarbeitung und sichtbare Fehler ohne Originalverlust.
 - **[Implementierungs-/Abnahmeprotokoll](docs/IMPLEMENTATION.md)**: tatsächlich ausgeführte Prüfungen, Umgebungshindernisse und verbleibende Live-Einrichtung.
 - **[Verbindlicher Plan und spätere Roadmap](docs/PLAN.md)**.

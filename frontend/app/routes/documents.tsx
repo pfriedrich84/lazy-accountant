@@ -9,6 +9,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   MenuItem,
   Paper,
   Stack,
@@ -40,6 +41,7 @@ export default function Documents() {
   const [params] = useSearchParams();
   const [status, setStatus] = useState(params.get("status") || "");
   const [kind, setKind] = useState("");
+  const [exclusion, setExclusion] = useState("active");
   const [search, setSearch] = useState("");
   const [scope, setScope] = useState("company");
   const [monthOnly, setMonthOnly] = useState(false);
@@ -48,6 +50,7 @@ export default function Documents() {
   const input = useRef<HTMLInputElement>(null);
   const filters = new URLSearchParams({
     limit: "40",
+    exclusion,
     ...(scope === "inbox"
       ? { company_id: "inbox" }
       : scope === "all"
@@ -218,6 +221,17 @@ export default function Documents() {
         </TextField>
         <TextField
           select
+          label="Ausschluss"
+          value={exclusion}
+          onChange={(e) => setExclusion(e.target.value)}
+          sx={{ minWidth: 190 }}
+        >
+          <MenuItem value="active">Aktive Dokumente</MenuItem>
+          <MenuItem value="excluded">Ausgeschlossene Nichtbelege</MenuItem>
+          <MenuItem value="all">Aktive und ausgeschlossene</MenuItem>
+        </TextField>
+        <TextField
+          select
           label="Status"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
@@ -316,6 +330,13 @@ export default function Documents() {
                     <TableCell>{d.period || "—"}</TableCell>
                     <TableCell>
                       <Status status={d.status} />
+                      {d.is_excluded && (
+                        <Chip
+                          size="small"
+                          label="Ausgeschlossen"
+                          title={d.exclusion_reason}
+                        />
+                      )}
                     </TableCell>
                     <TableCell align="right">{bytes(d.size)}</TableCell>
                   </TableRow>

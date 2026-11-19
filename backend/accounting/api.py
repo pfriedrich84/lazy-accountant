@@ -130,6 +130,7 @@ class Documents(APIView):
                         "kind",
                         "search",
                         "category_id",
+                        "exclusion",
                         "cursor",
                         "limit",
                     )
@@ -224,6 +225,18 @@ class Reconciliation(APIView):
                 "Ungültiger Zahlungsauftrag.", details=exc.errors(include_context=False)
             ) from exc
         return Response(function(request_actor(request), **payload))
+
+
+class DocumentExclusion(APIView):
+    def post(self, request, document_id, excluded):
+        return Response(
+            services.change_document_exclusion(
+                request_actor(request),
+                document_id,
+                request.data,
+                excluded=excluded,
+            )
+        )
 
 
 class DocumentName(APIView):

@@ -74,6 +74,26 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     parent = get_package(actor, parent_id) if parent_id else None
     if parent and (parent.company_id != company.id or parent.periods != periods):
         raise DomainError("Nachtrag muss dieselbe Firma und dieselben Monate betreffen.")
+    # Latest observed states win across the complete supplement chain. v1 only
+    # recorded included items; v2 also records exclusions/restores without files.
+    known, prior = {}, {}
+    ancestor = parent
+    while ancestor:
+        states = ancestor.snapshot.get("document_states", [])
+        for state in states:
+            known.setdefault(state["document_id"], {**state, "package_id": str(ancestor.id)})
+        for item in ancestor.items.all():
+            prior.setdefault(str(item.document_id), item.revision)
+            known.setdefault(
+                str(item.document_id),
+                {
+                    "document_id": str(item.document_id),
+                    "revision": item.revision,
+                    "is_excluded": False,
+                    "package_id": str(ancestor.id),
+                },
+            )
+        ancestor = ancestor.parent
     docs = (
         Document.objects.filter(company=company)
         .filter(Q(period__in=periods) | Q(period=""))
@@ -86,16 +106,37 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     docs = list(docs)
     names = naming.resolve(naming.context_many(docs))
     included, excluded, unchanged = [], [], []
-    prior = {str(item.document_id): item.revision for item in parent.items.all()} if parent else {}
-    # A chain of supplements compares against all previous delivered revisions.
-    ancestor = parent.parent if parent else None
-    while ancestor:
-        for item in ancestor.items.all():
-            prior.setdefault(str(item.document_id), item.revision)
-        ancestor = ancestor.parent
+    intentional_exclusions, exclusion_changes, document_states = [], [], []
     for doc in docs:
         data = document_data(doc, names=names)
-        if doc.period not in periods:
+        previous = known.get(str(doc.id))
+        document_states.append(
+            {
+                "document_id": str(doc.id),
+                "revision": doc.version,
+                "is_excluded": doc.is_excluded,
+            }
+        )
+        if previous and previous["is_excluded"] != doc.is_excluded:
+            revision = (
+                doc.revisions.filter(source="exclude" if doc.is_excluded else "restore")
+                .order_by("-version")
+                .first()
+            )
+            exclusion_changes.append(
+                {
+                    "document_id": str(doc.id),
+                    "original_name": doc.original_name,
+                    "old_revision": previous["revision"],
+                    "new_revision": doc.version,
+                    "action": "exclude" if doc.is_excluded else "restore",
+                    "reason": revision.reason if revision else doc.exclusion_reason,
+                    "previous_package_id": previous["package_id"],
+                }
+            )
+        if doc.is_excluded:
+            intentional_exclusions.append({"document": data, "reason": doc.exclusion_reason})
+        elif doc.period not in periods:
             excluded.append({"document": data, "reason": "Übergabemonat ungeklärt"})
         elif doc.duplicate_of_id:
             excluded.append({"document": data, "reason": "Als Dublette markiert"})
@@ -121,7 +162,12 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     payments = []
     previous_payments = {p["document_id"]: p for p in parent.snapshot.get("payments", [])} if parent else {}
     for doc in docs:
-        if doc.kind in INVOICE_KINDS and doc.period in periods and not doc.duplicate_of_id:
+        if (
+            doc.kind in INVOICE_KINDS
+            and doc.period in periods
+            and not doc.duplicate_of_id
+            and not doc.is_excluded
+        ):
             payment = {**status_for_document(doc), "period": doc.period}
             payment["snapshot_revision"] = digest({k: v for k, v in payment.items() if k != "as_of"})
             payments.append(payment)
@@ -130,18 +176,17 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         for p in payments
         if previous_payments.get(p["document_id"], {}).get("snapshot_revision") != p["snapshot_revision"]
     ]
-    inbox = []
+    inbox, excluded_inbox = [], []
     try:
         actor.require_inbox(actor.user_id)
-        inbox = [
-            str(x)
-            for x in Document.objects.filter(company__isnull=True, inbox_owner_id=actor.user_id).values_list(
-                "id", flat=True
-            )
-        ]
+        personal = Document.objects.filter(company__isnull=True, inbox_owner_id=actor.user_id)
+        inbox = [str(x) for x in personal.filter(is_excluded=False).values_list("id", flat=True)]
+        # Preview-only: never copy personal inbox exclusions into a company export.
+        excluded_inbox = [str(x) for x in personal.filter(is_excluded=True).values_list("id", flat=True)]
     except DomainError:
         pass
     return {
+        "schema_version": 2,
         "company": {"id": company.id, "name": company.name, "folder": company.folder},
         "periods": periods,
         "parent_id": str(parent.id) if parent else None,
@@ -152,6 +197,10 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         "payments": payments,
         "payment_changes": payment_changes,
         "excluded": excluded,
+        "intentional_exclusions": intentional_exclusions,
+        "exclusion_changes": exclusion_changes,
+        "document_states": document_states,
+        "excluded_inbox": excluded_inbox,
         "unassigned_inbox": inbox,
         "unchanged": unchanged,
         "count": len(included),
@@ -268,11 +317,24 @@ def build_archive(snapshot, package_id, version):
                 indent=2,
             ).encode()
         notes = "\n".join(f"- {e['document']['original_name']}: {e['reason']}" for e in snapshot["excluded"])
+        intentional = "\n".join(
+            f"- {e['document']['original_name']} ("
+            f"{e['document']['period'] or 'ohne Monatszuordnung'}): {e['reason']}"
+            for e in snapshot.get("intentional_exclusions", [])
+        )
+        changes = "\n".join(
+            f"- {e['document_id']}: {e['action']} v{e['old_revision']} → v{e['new_revision']}; "
+            f"{e['reason']} (Vorgängerpaket {e['previous_package_id']})"
+            for e in snapshot.get("exclusion_changes", [])
+        )
         body = (
             f"Unterlagen für {snapshot['company']['name']} – {period}\nPaket {package_id}, Version {version}\n"
             f"Nachtrag zu: {snapshot['parent_id'] or 'keinem Vorgänger'}\nEmpfänger: {', '.join(snapshot['recipients'])}\n"
             f"{len(docs)} Originale enthalten. Unveränderte Dokumente aus Vorgängern: {len(snapshot['unchanged'])}.\n"
-            f"Offene/ausgeschlossene Unterlagen:\n{notes or 'Keine'}\n"
+            f"Offene/prüfbedingt ausgeschlossene Unterlagen:\n{notes or 'Keine'}\n"
+            f"Bewusst ausgeschlossene Nichtbelege (nicht enthalten, nicht blockierend):\n{intentional or 'Keine'}\n"
+            f"Ausschluss-/Wiederherstellungsänderungen zum Vorgänger:\n{changes or 'Keine'}\n"
+            "Alte Pakete und bereits übergebene Originale bleiben unverändert.\n"
             f"Nicht zugeordnete Eingangsdokumente: {len(snapshot['unassigned_inbox'])}\n"
             "Dies ist eine Unterlagensammlung, keine bestätigte Buchhaltung.\n"
         )
@@ -299,6 +361,12 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
     if not idempotency_key or len(idempotency_key) > 120:
         raise DomainError("Idempotenzschlüssel erforderlich (max. 120 Zeichen).")
     with transaction.atomic():
+        # Match document writers' actor -> company -> document lock order.
+        # Package.actor's FK otherwise acquires a user KEY SHARE after holding
+        # the company, deadlocking with an exclusion waiting for that company.
+        from django.contrib.auth import get_user_model
+
+        get_user_model().objects.select_for_update().get(id=actor.user_id)
         company = actor.companies("process").select_for_update().get(id=company_id)
         prior = Package.objects.filter(company=company, idempotency_key=idempotency_key).first()
         if prior:
@@ -312,6 +380,7 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
         ):
             storage.reconcile(document_id)
         snapshot = package_preview(actor, company_id, periods, parent_id, lock=True)
+        snapshot.pop("excluded_inbox", None)
         if snapshot["bytes"] > settings.MAX_PACKAGE_BYTES:
             raise DomainError(
                 "Paket überschreitet das konfigurierte Verarbeitungsgrößenlimit. Weniger Monate auswählen oder das Betriebslimit bewusst anpassen.",
