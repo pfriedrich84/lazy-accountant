@@ -134,6 +134,10 @@ export interface Metadata {
   gross?: string | null;
   taxes?: { rate?: string | null; net?: string | null; tax?: string | null }[];
   subtype?: string | null;
+  confirmed_partner_name?: string | null;
+  bank_short_name?: string | null;
+  valuation_date?: string | null;
+  isin?: string | null;
   note?: string;
   open_points?: string[];
   evidence?: Record<
@@ -150,6 +154,12 @@ export interface Document {
   id: string;
   company_id: number | null;
   original_name: string;
+  handover_name: string;
+  proposed_name: string;
+  effective_name: string;
+  name_source: "generated" | "manual" | "fallback";
+  name_warning: string;
+  name_conflict: boolean;
   sha256: string;
   size: number;
   media_type: string;

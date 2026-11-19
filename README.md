@@ -53,6 +53,8 @@ Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel 
 
 Originalbytes bleiben unverändert; Ausleseergebnisse sind getrennte, revisionsgeschützte Metadaten. Monatskorrekturen ändern die echte Ablage, aber niemals bereits erzeugte Paket-Snapshots. Nachträge verweisen auf Vorgänger und berücksichtigen deren Revisionsstände.
 
+**Lesbare Übergabenamen** werden separat aus strukturierten Belegdaten erzeugt und für neue ZIPs, CSV/XLSX, Inhaltsliste und Einzel-Downloads verwendet – ohne standardmäßiges UUID-Präfix. Originalnamen bleiben sichtbar. Manuelle Namen sind versioniert und vor erneuter Agentenverarbeitung geschützt. Bestandsnamen nur nach Vorschau ausdrücklich übernehmen; bestehende Pakete bleiben unverändert. Details und REST-/MCP-Aufrufe: [Übergabenamen](docs/HANDOVER_NAMES.md).
+
 ## Synthetischer Beispielmonat
 
 ```sh

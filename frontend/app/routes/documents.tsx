@@ -33,6 +33,7 @@ import {
 } from "../api";
 import { Empty, ErrorAlert, Heading, Loading, Status } from "../components";
 import { useApp } from "./shell";
+import { NamePreview } from "../document-names";
 
 export default function Documents() {
   const { companyId, period } = useApp();
@@ -281,6 +282,7 @@ export default function Documents() {
           >
             {list.data?.pages[0].total} Dokumente gefunden
           </Typography>
+          <NamePreview key={filters.toString()} documents={rows} />
           <TableContainer component={Paper}>
             <Table size="small">
               <TableHead>
@@ -300,8 +302,19 @@ export default function Documents() {
                         to={`/documents/${d.id}`}
                         style={{ fontWeight: 650 }}
                       >
-                        {d.original_name}
+                        {d.effective_name}
                       </Link>
+                      <Typography variant="caption" sx={{ display: "block" }}>
+                        Original: {d.original_name}
+                      </Typography>
+                      {d.name_warning && (
+                        <Typography
+                          variant="caption"
+                          sx={{ display: "block", color: "warning.main" }}
+                        >
+                          {d.name_warning}
+                        </Typography>
+                      )}
                       <Typography
                         variant="caption"
                         sx={{

@@ -31,8 +31,18 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
   await page
     .getByLabel("Dokumentdateien")
     .setInputFiles({ name: filename, mimeType: "image/png", buffer: bytes });
-  await page.getByRole("link", { name: filename, exact: true }).click();
-  await expect(page.getByRole("heading", { name: filename })).toBeVisible();
+  const signatureRow = page
+    .getByRole("row")
+    .filter({ hasText: `Original: ${filename}` });
+  await signatureRow.getByRole("link").click();
+  await expect(
+    page.getByText(`Originalname: ${filename}`, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: new RegExp(`^${filename.slice(0, -4)}-[a-f0-9]+\\.png$`),
+    }),
+  ).toBeVisible();
   const docUrl = page.url();
   await page
     .getByRole("button", { name: "Als Nichtbeleg ausschließen", exact: true })
@@ -75,7 +85,7 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
   await page
     .getByRole("option", { name: "Ausgeschlossene Nichtbelege", exact: true })
     .click();
-  await page.getByRole("link", { name: filename, exact: true }).click();
+  await signatureRow.getByRole("link").click();
   await expect(page).toHaveURL(docUrl);
   await page
     .getByRole("button", { name: "Wiederherstellen", exact: true })

@@ -103,6 +103,30 @@ def test_materialized_month_and_restore_validation(actor, companies):
     call_command("verify_integrity")
 
 
+def test_handover_name_survives_exclusion_restore_and_snapshots(actor, companies):
+    from accounting import name_changes
+
+    company = companies[0]
+    doc = services.ingest(actor, "receipt.pdf", sample_pdf(["named receipt"]), company.id)["document"]
+    doc = services.save_result(actor, result(doc, company.id, approve=True))
+    doc = name_changes.set_name(actor, doc["id"], doc["version"], "Manuelle Übergabe.pdf")
+    before = packages.create_package(actor, company.id, ["2026-10"], "named-before")
+    original_package = Package.objects.get(id=before["id"])
+    original_bytes = packages.package_bytes(original_package)
+    archive_path = before["snapshot"]["documents"][0]["archive_path"]
+    assert archive_path.endswith("/Manuelle Übergabe.pdf")
+    excluded = change(actor, doc)["document"]
+    assert excluded["handover_name"] == doc["handover_name"]
+    assert excluded["effective_name"] == "Manuelle Übergabe.pdf" and excluded["name_source"] == "manual"
+    preview = packages.package_preview(actor, company.id, ["2026-10"], before["id"])
+    assert preview["documents"] == [] and preview["intentional_exclusions"][0]["document"]["id"] == doc["id"]
+    restored = change(actor, excluded, False)["document"]
+    assert restored["handover_name"] == doc["handover_name"] and restored["status"] == "ready"
+    after = packages.create_package(actor, company.id, ["2026-10"], "named-after", before["id"])
+    assert after["snapshot"]["documents"][0]["archive_path"] == archive_path
+    assert packages.package_bytes(original_package) == original_bytes
+
+
 def test_idempotent_retry_noop_conflict_and_historical_replay(actor):
     d = services.ingest(actor, "s.png", sample_image())["document"]
     first = change(actor, d, key="exclude-one")

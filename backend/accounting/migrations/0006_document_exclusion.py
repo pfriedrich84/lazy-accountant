@@ -7,7 +7,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("accounting", "0004_alter_document_related"),
+        ("accounting", "0005_document_handover_name_document_name_source"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

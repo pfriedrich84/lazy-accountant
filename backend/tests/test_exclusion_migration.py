@@ -5,7 +5,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 @pytest.mark.django_db(transaction=True)
 def test_exclusion_migration_preserves_legacy_documents_revisions_and_snapshots():
-    before = [("accounting", "0004_alter_document_related")]
+    before = [("accounting", "0005_document_handover_name_document_name_source")]
     executor = MigrationExecutor(connection)
     latest = executor.loader.graph.leaf_nodes()
     executor.migrate(before)
@@ -28,6 +28,8 @@ def test_exclusion_migration_preserves_legacy_documents_revisions_and_snapshots(
             media_type="image/png",
             status="review",
             issues=["legacy issue"],
+            handover_name="Manueller Altname.png",
+            name_source="manual",
         )
         historical = {"status": "review", "version": 1}
         Revision.objects.create(
@@ -52,6 +54,7 @@ def test_exclusion_migration_preserves_legacy_documents_revisions_and_snapshots(
         assert not migrated.is_excluded and migrated.exclusion_reason == ""
         assert migrated.excluded_by_id is migrated.excluded_at is None
         assert migrated.version == 1 and migrated.issues == ["legacy issue"]
+        assert migrated.handover_name == "Manueller Altname.png" and migrated.name_source == "manual"
         revision = apps.get_model("accounting", "Revision").objects.get(document_id=doc.id)
         assert revision.reason == "" and revision.snapshot == historical
         frozen = apps.get_model("accounting", "Package").objects.get(id=package.id)

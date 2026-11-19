@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 from rest_framework.response import Response
 from rest_framework.views import APIView, exception_handler as drf_exception_handler
 
-from . import jobs, mail, packages, services, storage, transfers
+from . import jobs, mail, name_changes, naming, packages, services, storage, transfers
 from .auth import DomainError, issue_token, request_actor
 from .models import AccessToken, Account, Category, Dispatch, ImportSource, Job, Package
 from .schemas import DocumentResult
@@ -184,6 +184,30 @@ class DocumentExclusion(APIView):
         )
 
 
+class DocumentName(APIView):
+    def patch(self, request, document_id):
+        if "name" not in request.data:
+            raise DomainError("name erforderlich; null setzt auf den Vorschlag zurück.")
+        return Response(
+            name_changes.set_name(
+                request_actor(request),
+                str(document_id),
+                request.data.get("base_version"),
+                request.data["name"],
+            )
+        )
+
+
+class DocumentNames(APIView):
+    def post(self, request, action):
+        actor = request_actor(request)
+        if action == "preview":
+            return Response(name_changes.preview(actor, request.data.get("document_ids")))
+        if action == "backfill":
+            return Response(name_changes.change(actor, request.data.get("entries")))
+        raise DomainError("Aktion nicht gefunden.", 404)
+
+
 class DocumentFile(APIView):
     def get(self, request, document_id, representation):
         actor = request_actor(request)
@@ -204,7 +228,8 @@ class DocumentFile(APIView):
         from django.utils.http import content_disposition_header
 
         response["Content-Disposition"] = content_disposition_header(
-            doc.media_type == "application/xml", storage.safe_filename(doc.original_name)
+            representation == "download" or doc.media_type == "application/xml",
+            naming.data(doc)["effective_name"],
         )
         response["Cache-Control"] = "private, no-store"
         response["Content-Security-Policy"] = "sandbox"

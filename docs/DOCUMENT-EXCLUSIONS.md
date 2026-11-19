@@ -60,7 +60,7 @@ Nicht unterstützte IMAP-Anhänge ohne `Document` bleiben `ImportSource`-Fehler 
 
 ## Migration und Betriebshinweise
 
-Migration `0005` ist additiv: alle bisherigen Dokumente bleiben aktiv; historische Revisionen haben einen leeren Revisionsgrund. Keine JSON-Snapshots werden umgeschrieben, keine Signaturen geraten. Alte Pakete ohne `schema_version` bleiben v1 und verwenden ihre bisherige Versandregel; Frontend liest neue optionale Felder mit leerem Default.
+Migration `0006` baut auf der Übergabenamen-Migration `0005` auf und ist additiv: alle bisherigen Dokumente bleiben aktiv; historische Revisionen haben einen leeren Revisionsgrund. Keine JSON-Snapshots werden umgeschrieben, keine Signaturen geraten. Alte Pakete ohne `schema_version` bleiben v1 und verwenden ihre bisherige Versandregel; Frontend liest neue optionale Felder mit leerem Default.
 
 Backend, Worker, Frontend und Skills gemeinsam aktualisieren, Migration vor Schreibzugriff. Gemischte alte Worker sind nicht unterstützt. **Nach Nutzung des Flags ist ein Rollback auf alten Anwendungscode unsicher:** dieser könnte ausgeschlossene Dokumente wieder in Pakete aufnehmen. Rücknahme nur mit Wartungsfenster und bewusstem Daten-/Ablageplan; kein automatisches Löschen der Ausschlussdaten. Backup/Restore muss wie bisher Datenbank und komplettes Dokumentvolume gemeinsam sichern, einschließlich `_excluded` und unveränderlicher Altpakete.
 

@@ -10,7 +10,7 @@ from mcp.server.mcpserver import Context, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import StrictInt
 
-from . import jobs, mail, packages, services, transfers
+from . import jobs, mail, name_changes, packages, services, transfers
 from .auth import token_actor
 from .models import Job
 from .schemas import DocumentResult
@@ -113,7 +113,12 @@ async def get_file_access(document_id: str, ctx: Context) -> dict[str, Any]:
         "sha256": d["sha256"],
         "bytes": d["size"],
         "media_type": d["media_type"],
+        "original_name": d["original_name"],
+        "proposed_name": d["proposed_name"],
+        "effective_name": d["effective_name"],
+        "name_source": d["name_source"],
         "original_url": f"/api/documents/{document_id}/original/",
+        "download_url": f"/api/documents/{document_id}/download/",
         "page_url": f"/api/documents/{document_id}/page/?page=1",
         "authentication": "Authorization: Bearer <same token>",
         "method": "GET",
@@ -190,6 +195,26 @@ async def restore_document(
         },
         excluded=False,
     )
+
+
+@server.tool()
+async def preview_document_names(document_ids: list[str], ctx: Context) -> list[dict]:
+    """Alt-/Neuname, Konflikte und geschützte manuelle Namen für bis zu 100 IDs lesend vorschauen."""
+    return await call(ctx, name_changes.preview, document_ids)
+
+
+@server.tool()
+async def backfill_document_names(entries: list[dict[str, Any]], ctx: Context) -> list[dict]:
+    """Nur auf ausdrücklichen Auftrag: Vorschläge versioniert übernehmen; je Eintrag document_id/base_version. Manuelle Namen bleiben geschützt."""
+    return await call(ctx, name_changes.change, entries)
+
+
+@server.tool()
+async def set_document_name(
+    document_id: str, base_version: int, name: str | None, ctx: Context
+) -> dict[str, Any]:
+    """Manuellen Übergabenamen ohne Pfad versioniert setzen; null setzt explizit auf den Generator zurück. Keine fachliche Statusänderung."""
+    return await call(ctx, name_changes.set_name, document_id, base_version, name)
 
 
 @server.tool()

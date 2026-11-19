@@ -11,7 +11,7 @@ from django.db import transaction
 from django.db.models import Max, Q
 from openpyxl import Workbook
 
-from . import storage
+from . import naming, storage
 from .auth import DomainError
 from .models import Document, FileOperation, Package, PackageItem
 from .services import document_data, valid_period
@@ -103,10 +103,12 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     )
     if lock:
         docs = docs.select_for_update(of=("self",))
+    docs = list(docs)
+    names = naming.resolve(naming.context_many(docs))
     included, excluded, unchanged = [], [], []
     intentional_exclusions, exclusion_changes, document_states = [], [], []
     for doc in docs:
-        data = document_data(doc)
+        data = document_data(doc, names=names)
         previous = known.get(str(doc.id))
         document_states.append(
             {
@@ -147,7 +149,10 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         elif prior.get(str(doc.id)) == doc.version:
             unchanged.append(str(doc.id))
         else:
-            data["archive_path"] = storage.desired_path(doc)
+            year, month = doc.period.split("-")
+            data["archive_path"] = (
+                f"{company.folder}/{year}/{month}/{storage.KIND_FOLDER[doc.kind]}/{data['effective_name']}"
+            )
             data["account_name"] = doc.account.name if doc.account_id else ""
             data["account_identifier"] = doc.account.identifier if doc.account_id else ""
             data["category_name"] = doc.category.name if doc.category_id else ""
@@ -213,6 +218,8 @@ def build_archive(snapshot, package_id, version):
     for d in snapshot["documents"]:
         doc = Document.objects.get(id=d["id"])
         data = storage.read_original(doc)
+        if d["archive_path"] in files:
+            raise DomainError("Doppelter Übergabepfad im Snapshot; kein Überschreiben erlaubt.", 409)
         files[d["archive_path"]] = data
         originals[d["archive_path"]] = {
             "document_id": d["id"],
