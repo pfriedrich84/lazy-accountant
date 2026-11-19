@@ -50,7 +50,9 @@ jobs:
           [ "$ready" = 1 ] || { docker logs clamav-integration; exit 1; }
           CLAMAV_HOST=127.0.0.1 CLAMAV_PORT=13310 RUN_CLAMAV_TESTS=1 uv run pytest -q -m clamav
       - if: always()
-        run: docker logs --tail=80 clamav-integration 2>/dev/null; docker rm -f clamav-integration 2>/dev/null || true
+        run: |
+          docker logs --tail=80 clamav-integration 2>/dev/null || true
+          docker rm -f clamav-integration 2>/dev/null || true
 
   frontend:
     runs-on: ubuntu-24.04
