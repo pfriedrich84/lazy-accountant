@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from pydantic import ValidationError
 
-from . import storage
+from . import naming, storage
 from .auth import DomainError
 from .models import (
     Account,
@@ -142,7 +142,7 @@ def get_document(actor, document_id, permission="read", lock=False):
     return d
 
 
-def document_data(d, detailed=False):
+def document_data(d, detailed=False, names=None):
     desired = storage.desired_path(d)
     pending = d.filed_path != desired
     filing_error = ""
@@ -158,6 +158,7 @@ def document_data(d, detailed=False):
         "id": str(d.id),
         "company_id": d.company_id,
         "original_name": d.original_name,
+        **naming.data(d, names),
         "sha256": d.sha256,
         "size": d.size,
         "media_type": d.media_type,
@@ -201,7 +202,20 @@ def document_data(d, detailed=False):
         )
     if d.security_status != "clean":
         # Historical extraction/revisions must not leak after a later finding.
-        result.update(metadata={}, issues=[], parser_result={}, parser_error="", revisions=[], filed_path="")
+        result.update(
+            metadata={},
+            issues=[],
+            parser_result={},
+            parser_error="",
+            revisions=[],
+            filed_path="",
+            handover_name="",
+            proposed_name="",
+            effective_name=storage.safe_filename(d.original_name),
+            name_source="fallback",
+            name_warning=d.security_error,
+            name_conflict=False,
+        )
     if detailed:
         from .security import affected
 
@@ -248,7 +262,9 @@ def list_documents(
         qs = qs.filter(category_id=category_id)
     if search:
         qs = qs.filter(
-            Q(original_name__icontains=search) | Q(security_status="clean", metadata__icontains=search)
+            Q(original_name__icontains=search)
+            | Q(security_status="clean", handover_name__icontains=search)
+            | Q(security_status="clean", metadata__icontains=search)
         )
     # UUID cursor is stable while status changes during processing; never use offsets for a mutable open list.
     qs = qs.order_by("id")
@@ -260,8 +276,9 @@ def list_documents(
             raise DomainError("Ungültiger Cursor.") from None
     limit = max(1, min(int(limit), 100))
     rows = list(qs.select_related("company", "account", "category").prefetch_related("related")[: limit + 1])
+    names = naming.resolve(naming.context_many(rows[:limit]))
     return {
-        "results": [document_data(d) for d in rows[:limit]],
+        "results": [document_data(d, names=names) for d in rows[:limit]],
         "total": total,
         "next_cursor": str(rows[limit - 1].id) if len(rows) > limit else None,
     }
@@ -336,6 +353,8 @@ def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=
             doc.original_path = doc.quarantine_path
             storage.atomic_write(doc.quarantine_path, data, digest)
             doc.issues = validation_issues(doc.kind, company_id, "", None, {}, doc.parser_error)
+            doc.handover_name = naming.fallback(doc)
+            doc.name_source = "fallback"
             doc.save()
             Revision.objects.create(
                 document=doc,
@@ -443,6 +462,10 @@ def save_result(actor, payload, source="manual"):
         doc.status = "ready" if result.approve else "review"
         doc.version += 1
         doc.duplicate_of = duplicate
+        if doc.name_source != "manual":
+            proposed = naming.proposal(doc)
+            doc.handover_name = proposed["name"]
+            doc.name_source = proposed["source"]
         doc.save()
         doc.related.set(related)
         Revision.objects.create(

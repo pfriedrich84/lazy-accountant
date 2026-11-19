@@ -128,6 +128,11 @@ def run_scan(document_id):
                 os.chmod(storage.path(relative), 0o400)
                 current.original_path = relative
                 current.media_type = media
+                if current.name_source == "fallback" or not current.handover_name:
+                    from . import naming
+
+                    current.handover_name = naming.fallback(current)
+                    current.name_source = "fallback"
                 current.parser_result = parsed
                 current.parser_error = ""
                 if media == "application/xml":

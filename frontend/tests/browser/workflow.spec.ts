@@ -109,9 +109,16 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
     .getByLabel("Dokumentdateien")
     .setInputFiles(path.resolve("../var/samples/eingang.pdf"));
   await expect(page.getByText(/1 Datei\(en\) übernommen/)).toBeVisible();
-  await page.getByRole("link", { name: "eingang.pdf", exact: true }).click();
+  await page
+    .getByRole("row")
+    .filter({ hasText: "Original: eingang.pdf" })
+    .getByRole("link")
+    .click();
   await expect(
-    page.getByRole("heading", { name: "eingang.pdf" }),
+    page.getByText("Originalname: eingang.pdf", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /^eingang-[a-f0-9]+\.pdf$/ }),
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "Original öffnen" })).toBeVisible(
     { timeout: 90_000 },
@@ -224,9 +231,13 @@ test("Zwei vollständige Firmenmonate mit allen Dokumentarten über die Oberflä
     await expect(page.getByText(/8 Datei\(en\) übernommen/)).toBeVisible();
     let bankPdfId = "";
     for (const [index, [name, kind]] of files.entries()) {
-      await page.getByRole("link", { name, exact: true }).click();
+      await page
+        .getByRole("row")
+        .filter({ has: page.getByText(`Original: ${name}`, { exact: true }) })
+        .getByRole("link")
+        .click();
       await expect(
-        page.getByRole("heading", { name, exact: true }),
+        page.getByText(`Originalname: ${name}`, { exact: true }),
       ).toBeVisible();
       await expect(
         page.getByRole("link", { name: "Original öffnen" }),
