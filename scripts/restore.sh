@@ -18,6 +18,8 @@ docker compose stop app worker >&2
 docker compose up -d --wait db >&2
 docker compose exec -T db sh -c 'exec pg_restore --clean --if-exists --exit-on-error --no-owner --no-privileges --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' < "$source_dir/database.dump"
 docker compose run --rm --no-deps -T app python scripts/restore_files.py --yes-replace < "$source_dir/documents.tar"
+docker compose run --rm --no-deps -T app python backend/manage.py migrate --noinput
+docker compose run --rm --no-deps -T app python backend/manage.py prepare_security
 docker compose run --rm --no-deps -T app python backend/manage.py verify_integrity --repair
 # A job that was running in the backed-up process cannot still own a live lease.
 docker compose run --rm --no-deps -T app python backend/manage.py recover_jobs

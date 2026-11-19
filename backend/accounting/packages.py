@@ -1,3 +1,4 @@
+import copy
 import csv
 import io
 import json
@@ -50,10 +51,39 @@ def package_data(p, detailed=False):
         "sha256": p.sha256,
         "size": p.size,
         "created_at": p.created_at.isoformat(),
+        "security_blocked": package_blockers(p),
     }
     if detailed:
-        data["snapshot"] = p.snapshot
+        data["snapshot"] = copy.deepcopy(p.snapshot)
         data["items"] = list(p.items.values("document_id", "revision", "archive_path", "sha256", "metadata"))
+        exclusions = data["snapshot"]["excluded"] + data["snapshot"].get("intentional_exclusions", [])
+        documents = data["snapshot"]["documents"] + [e["document"] for e in exclusions]
+        blocked_ids = {
+            str(identifier)
+            for identifier in Document.objects.filter(
+                id__in=[d["id"] for d in documents],
+            )
+            .exclude(security_status="clean")
+            .values_list("id", flat=True)
+        }
+        blocked_ids.update(entry["document_id"] for entry in data["security_blocked"])
+        for document in documents:
+            if document["id"] in blocked_ids:
+                document.update(
+                    metadata={},
+                    issues=[],
+                    parser_result={},
+                    revisions=[],
+                    proposed_name="",
+                    handover_name="",
+                    effective_name=storage.safe_filename(document["original_name"]),
+                )
+        for excluded in exclusions:
+            if excluded["document"]["id"] in blocked_ids:
+                excluded["reason"] = "Sicherheitssperre"
+        for item in data["items"]:
+            if str(item["document_id"]) in blocked_ids:
+                item["metadata"] = {}
     return data
 
 
@@ -105,7 +135,7 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         docs = docs.select_for_update(of=("self",))
     docs = list(docs)
     names = naming.resolve(naming.context_many(docs))
-    included, excluded, unchanged = [], [], []
+    included, excluded, unchanged, blocked = [], [], [], []
     intentional_exclusions, exclusion_changes, document_states = [], [], []
     for doc in docs:
         data = document_data(doc, names=names)
@@ -134,7 +164,15 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
                     "previous_package_id": previous["package_id"],
                 }
             )
-        if doc.is_excluded:
+        if doc.security_status != "clean" or doc.scanned_sha256 != doc.sha256:
+            blocked.append({"document": data, "reason": doc.security_error or doc.security_status})
+            excluded.append(
+                {
+                    "document": data,
+                    "reason": "Sicherheitssperre: " + (doc.security_error or doc.security_status),
+                }
+            )
+        elif doc.is_excluded:
             intentional_exclusions.append({"document": data, "reason": doc.exclusion_reason})
         elif doc.period not in periods:
             excluded.append({"document": data, "reason": "Übergabemonat ungeklärt"})
@@ -185,7 +223,10 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         excluded_inbox = [str(x) for x in personal.filter(is_excluded=True).values_list("id", flat=True)]
     except DomainError:
         pass
+    from .mail import import_errors
+
     return {
+        "blocked_imports": import_errors(actor, company_id),
         "schema_version": 2,
         "company": {"id": company.id, "name": company.name, "folder": company.folder},
         "periods": periods,
@@ -197,6 +238,7 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         "payments": payments,
         "payment_changes": payment_changes,
         "excluded": excluded,
+        "security_blocked": blocked,
         "intentional_exclusions": intentional_exclusions,
         "exclusion_changes": exclusion_changes,
         "document_states": document_states,
@@ -422,7 +464,41 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
     return package_data(p, True)
 
 
+def package_blockers(package):
+    return [
+        {
+            "document_id": str(item.document_id),
+            "reason": item.document.security_error
+            or (
+                item.document.security_status
+                if item.document.security_status != "clean"
+                else "Freigegebener Hash stimmt nicht mit Paket überein"
+            ),
+        }
+        for item in package.items.select_related("document")
+        if item.document.security_status != "clean" or item.document.scanned_sha256 != item.sha256
+    ]
+
+
+def require_package_safe(package):
+    blockers = package_blockers(package)
+    if blockers:
+        raise DomainError(
+            "Paket wegen Sicherheitsprüfung gesperrt.",
+            423,
+            {
+                "package_id": str(package.id),
+                "blocked": blockers,
+                "dispatch_ids": [str(x) for x in package.dispatches.values_list("id", flat=True)],
+            },
+        )
+    # Includes later on-disk tampering, not just recorded scanner findings.
+    for item in package.items.select_related("document"):
+        storage.read_original(item.document)
+
+
 def package_bytes(package):
+    require_package_safe(package)
     data = storage.path(package.path).read_bytes()
     if storage.checksum(data) != package.sha256:
         raise DomainError("Paket-Prüfsumme stimmt nicht.", 409)

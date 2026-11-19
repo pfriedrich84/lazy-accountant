@@ -21,6 +21,7 @@ Prüfzeitpunkt: **2026-11-18, ab 20:27 UTC**. Ausschließlich stabile Releases. 
 | uv (Lockfile/Containerinstallation) | 0.13.9 |
 | ISO-4217-Währungsdaten | iso4217 1.16.20260101 |
 | Kontrollierter Mailtest | GreenMail 2.1.15 |
+| Lokaler Malware-Scanner | ClamAV 1.5.5 (GPL-2.0, Image-Digest in Compose) |
 
 Alle direkten Python-Abhängigkeiten stehen exakt in `pyproject.toml`, alle transitiven Auflösungen einschließlich Hashes in `uv.lock`. Frontend: exakte Versionen in `frontend/package.json`, transitive Auflösung/Integritäten in `frontend/package-lock.json`. Container-Basisimages erhalten Versions- und Digest-Pins.
 
@@ -42,6 +43,10 @@ Alle direkten Python-Abhängigkeiten stehen exakt in `pyproject.toml`, alle tran
 [ISO-4217-Paketmetadaten](https://pypi.org/pypi/iso4217/json) am selben Tag nachgeprüft: stabile 1.16.20260101, Python >= 3.6. Validiert Währungscodes und währungsspezifische Minor Units; Geld-/Steuerprüfung verwendet kaufmännisches `ROUND_HALF_UP` statt zufälliger Binärfloat-/Banker's-Rundung.
 
 Weitere Bibliotheken (Pydantic, pypdf/pdfium, Pillow, openpyxl, defusedxml, Cryptography, pytest, Ruff) wurden anhand ihrer offiziellen PyPI-Release-Metadaten gewählt. Siehe exakte Pins und Lockfile.
+
+## ClamAV-Ergänzung (Issue #12)
+
+Offizielles stabiles [Release 1.5.5](https://github.com/Cisco-Talos/clamav/releases/tag/clamav-1.5.5) und Docker-Hub-Tag am 2026-11-19 geprüft, Index-Digest `sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8`. Produktionskonfiguration gegen `etc/clamd.conf.sample` dieses Releases geprüft; native 1.5.5 mit frischen offiziellen Signaturen für echte INSTREAM-/EICAR-/Format-/MCP-/REST-/IMAP-Tests ausgeführt. Details: [SECURITY.md](SECURITY.md). Keine zusätzlichen Python-Scanner-Abhängigkeiten: explizit begrenztes clamd-Protokoll über die Standardbibliothek.
 
 ## Kompatibilitätsabweichungen
 

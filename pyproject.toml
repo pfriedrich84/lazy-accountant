@@ -28,6 +28,7 @@ dev = ["pytest==9.2.0", "pytest-django==4.14.0", "httpx==0.28.1", "ruff==0.17.5"
 DJANGO_SETTINGS_MODULE = "config.settings"
 pythonpath = ["backend"]
 testpaths = ["backend/tests"]
+markers = ["security: deferred scanner state-machine tests", "clamav: integration with real clamd and fresh signatures"]
 
 [tool.ruff]
 line-length = 110

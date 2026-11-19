@@ -1,6 +1,6 @@
 # CAMT-Unterstützung
 
-Parser: `backend/accounting/camt.py`, `defusedxml` mit verbotenen DTDs, Entities und externen Referenzen. Originalbytes werden **vor der Auslese** unverändert mit SHA256 gespeichert. Ein Parser-/Versionsfehler verliert keine Originaldatei und bleibt als sichtbarer Prüfpunkt am Dokument.
+Parser: `backend/accounting/camt.py`, `defusedxml` mit verbotenen DTDs, Entities und externen Referenzen. Originalbytes werden **vor der Auslese** unverändert mit SHA256 in privater Quarantäne gespeichert. Erst ein erfolgreicher lokaler ClamAV-Scan erlaubt den ressourcenbegrenzten Parserprozess. Ein Parser-/Versionsfehler verliert keine Originaldatei, bleibt aber als sichtbarer Sicherheitsfehler gesperrt. Siehe [SECURITY.md](SECURITY.md).
 
 ## Explizit akzeptierte Namespaces
 
@@ -38,10 +38,10 @@ Ein PDF ohne eigenen Zeitraumaufdruck darf den ausdrücklich angegebenen Zeitrau
 
 ## Fehler und Grenzen
 
-- Unbekannter/fehlender Namespace, kaputtes XML oder fehlender Auszug: `parser_error`, offene Prüfpunkte, keine automatische Freigabe.
+- Unbekannter/fehlender Namespace, kaputtes XML oder fehlender Auszug: `security_status=error`, sichtbarer Fehlergrund, keine Freigabe und kein Datei-/Textzugriff.
 - DTD/Entity-Versuch: Abbruch der Auslese, Original bleibt erhalten; keine Netzwerk-/Dateisystemauflösung.
 - Uploadlimit standardmäßig 25 MiB. Der Mailimport prüft zusätzlich die gesamte Nachricht vor dem Abruf (50 MiB) und die Anhangsanzahl.
-- Nicht unterstützte Mailanhänge erhalten einen Fehlerdatensatz mit Herkunft und gesicherten Bytes unter dem technischen `_rejected`-Bereich. Überlimit-Nachrichten bleiben unverändert im Postfach mit sichtbarem Fehler/UID.
+- Nicht unterstützte Mailanhänge bleiben als gesperrte Importfälle mit Herkunft und gesicherten Bytes im technischen `_quarantine`-Bereich erhalten. Überlimit-Nachrichten bleiben unverändert im Postfach mit sichtbarem Fehler/UID.
 - Bank-/Depotunterlagen benötigen für die Freigabe bekanntes Konto/Depot und Auszugsbeginn/-ende. Ein Parsererfolg ist kein Nachweis einer richtigen Firmenzuordnung oder vollständigen Buchhaltung.
 
 Tests enthalten synthetisches CAMT, nicht unterstützte Versionen und schädliche XML-Entities. Repräsentative anonymisierte Originaldateien der konkreten Banken gehören zur produktiven Live-Abnahme.

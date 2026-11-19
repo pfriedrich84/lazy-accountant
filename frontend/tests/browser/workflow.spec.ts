@@ -120,6 +120,9 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
   await expect(
     page.getByRole("heading", { name: /^eingang-[a-f0-9]+\.pdf$/ }),
   ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Original öffnen" })).toBeVisible(
+    { timeout: 90_000 },
+  );
   const documentCompany = page
     .getByRole("main")
     .getByLabel("Firma", { exact: true });
@@ -236,6 +239,9 @@ test("Zwei vollständige Firmenmonate mit allen Dokumentarten über die Oberflä
       await expect(
         page.getByText(`Originalname: ${name}`, { exact: true }),
       ).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: "Original öffnen" }),
+      ).toBeVisible({ timeout: 90_000 });
       await page.getByLabel("Dokumentart", { exact: true }).click();
       await page.getByRole("option", { name: kind, exact: true }).click();
       await page

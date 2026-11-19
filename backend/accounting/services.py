@@ -1,4 +1,3 @@
-import io
 import json
 import re
 import uuid
@@ -10,13 +9,10 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from PIL import Image, ImageOps
 from pydantic import ValidationError
-from pypdf import PdfReader
 
 from . import naming, storage
 from .auth import DomainError
-from .camt import parse_camt
 from .models import (
     Account,
     Category,
@@ -30,8 +26,6 @@ from .models import (
     Revision,
 )
 from .schemas import DocumentExclusionCommand, DocumentResult, validation_issues
-
-Image.MAX_IMAGE_PIXELS = 25_000_000
 
 
 def validate_original_filename(name):
@@ -179,6 +173,10 @@ def document_data(d, detailed=False, names=None):
         "metadata": d.metadata,
         "issues": d.issues,
         "status": d.status,
+        "security_status": d.security_status,
+        "security_error": d.security_error,
+        "scanned_sha256": d.scanned_sha256,
+        "scanned_at": d.scanned_at.isoformat() if d.scanned_at else None,
         "is_excluded": d.is_excluded,
         "exclusion_reason": d.exclusion_reason,
         "excluded_at": d.excluded_at.isoformat() if d.excluded_at else None,
@@ -218,6 +216,31 @@ def document_data(d, detailed=False, names=None):
                     )
                 ),
             }
+        )
+    if d.security_status != "clean":
+        # Historical extraction/revisions must not leak after a later finding.
+        result.update(
+            metadata={},
+            issues=[],
+            parser_result={},
+            parser_error="",
+            revisions=[],
+            filed_path="",
+            handover_name="",
+            proposed_name="",
+            effective_name=storage.safe_filename(d.original_name),
+            name_source="fallback",
+            name_warning=d.security_error,
+            name_conflict=False,
+        )
+    if detailed:
+        from .security import affected
+
+        result["security_impact"] = affected(d)
+        result["scans"] = list(
+            d.scans.order_by("-started_at").values(
+                "id", "sha256", "engine", "result", "signature", "reason", "started_at", "finished_at"
+            )
         )
     return result
 
@@ -262,8 +285,8 @@ def list_documents(
     if search:
         qs = qs.filter(
             Q(original_name__icontains=search)
-            | Q(handover_name__icontains=search)
-            | Q(metadata__icontains=search)
+            | Q(security_status="clean", handover_name__icontains=search)
+            | Q(security_status="clean", metadata__icontains=search)
         )
     # UUID cursor is stable while status changes during processing; never use offsets for a mutable open list.
     qs = qs.order_by("id")
@@ -285,6 +308,10 @@ def list_documents(
 
 def detect_media(data, name):
     suffix = name.lower().rsplit(".", 1)[-1]
+    if data.startswith(
+        (b"PK\x03\x04", b"PK\x05\x06", b"Rar!", b"7z\xbc\xaf\x27\x1c", b"\x1f\x8b", b"BZh", b"\xfd7zXZ\x00")
+    ):
+        raise DomainError("Archive sind kein erlaubtes Uploadformat.")
     # Bank exports may prepend printer/control records before the PDF header.
     # Search only the first 1024 bytes, not arbitrary embedded PDF content.
     # Keep the original bytes intact (including the prefix) for parsing/storage.
@@ -307,7 +334,8 @@ def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=
         actor.require(company_id, "process")
     else:
         actor.require_inbox(actor.user_id, "process")
-    media, ext = detect_media(data, name)
+    # Type detection and all document parsing happen only after the malware scan.
+    # Unsupported bytes are retained as a blocked import, never an allowed format.
     digest = storage.checksum(data)
     request_hash = storage.checksum(json.dumps([name, digest, company_id]).encode())
     if idempotency_key and len(idempotency_key) > 120:
@@ -341,33 +369,11 @@ def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=
                 original_name=name,
                 sha256=digest,
                 size=len(data),
-                media_type=media,
+                media_type="application/octet-stream",
             )
-            doc.original_path = f"_originals/{doc.id}{ext}"
-            storage.atomic_write(doc.original_path, data, digest)
-            if media == "application/xml":
-                doc.kind = "bank_camt"
-                try:
-                    doc.parser_result = parse_camt(data)
-                except Exception as e:
-                    doc.parser_error = "CAMT-Auslesefehler: " + str(e)[:1000]
-            else:
-                try:
-                    if media == "application/pdf":
-                        reader = PdfReader(io.BytesIO(data))
-                        doc.parser_result = {"pages": len(reader.pages)}
-                        if reader.is_encrypted:
-                            doc.parser_error = (
-                                "Verschlüsseltes PDF: Original erhalten, manuelle Prüfung nötig"
-                            )
-                    else:
-                        with Image.open(io.BytesIO(data)) as image:
-                            if image.width * image.height > Image.MAX_IMAGE_PIXELS:
-                                raise ValueError("Bildgröße überschreitet das sichere Vorschaulimit")
-                            image.verify()
-                        doc.parser_result = {"pages": 1}
-                except Exception:
-                    doc.parser_error = "Datei konnte nicht gelesen werden; Original erhalten"
+            doc.quarantine_path = f"_quarantine/{doc.id}.bin"
+            doc.original_path = doc.quarantine_path
+            storage.atomic_write(doc.quarantine_path, data, digest)
             doc.issues = validation_issues(doc.kind, company_id, "", None, {}, doc.parser_error)
             doc.handover_name = naming.fallback(doc)
             doc.name_source = "fallback"
@@ -380,7 +386,9 @@ def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=
                 source="upload",
                 snapshot=document_data(doc),
             )
-            storage.journal(doc)
+            from .security import publish
+
+            transaction.on_commit(lambda: publish(doc.id))
         if idempotency_key:
             IdempotencyRecord.objects.create(
                 actor_id=actor.user_id,
@@ -411,6 +419,9 @@ def save_result(actor, payload, source="manual"):
         company_ids = {c for c in [initial.company_id, result.company_id] if c}
         list(Company.objects.filter(id__in=company_ids).order_by("id").select_for_update())
         doc = get_document(actor, result.document_id, "process", lock=True)
+        from .security import require_clean
+
+        require_clean(doc)
         if doc.version != result.base_version:
             raise DomainError(
                 "Dokument wurde inzwischen geändert. Neu laden und Änderungen vergleichen.",
@@ -533,6 +544,32 @@ def change_document_exclusion(actor, document_id, payload, *, excluded):
         if prior:
             if prior.request_hash != request_hash:
                 raise DomainError("Idempotenzschlüssel gehört zu einer anderen Anfrage.", 409)
+            if doc.security_status != "clean":
+                # Keep the original business receipt, but never replay extracted
+                # content or an obsolete clean status after a later revocation.
+                replay = json.loads(json.dumps(prior.result))
+                safe = document_data(doc, True)
+                for key in (
+                    "metadata",
+                    "issues",
+                    "parser_result",
+                    "parser_error",
+                    "revisions",
+                    "filed_path",
+                    "handover_name",
+                    "proposed_name",
+                    "effective_name",
+                    "name_warning",
+                    "name_source",
+                    "security_status",
+                    "security_error",
+                    "scanned_sha256",
+                    "scanned_at",
+                    "scans",
+                    "security_impact",
+                ):
+                    replay["document"][key] = safe.get(key)
+                return json.loads(json.dumps(replay, cls=DjangoJSONEncoder))
             return prior.result
         if doc.company_id != initial.company_id:
             raise DomainError("Firmenzuordnung wurde inzwischen geändert. Neu laden.", 409)
@@ -665,67 +702,6 @@ def readable_document(actor, document_id, page=1, image=False):
     data = storage.read_original(doc)
     if page < 1 or page > 500:
         raise DomainError("Ungültige Seitennummer.")
-    if doc.media_type == "application/xml":
-        if image:
-            raise DomainError("XML hat keine Seitenansicht.")
-        return {
-            "text": data.decode("utf-8", errors="replace"),
-            "structured": doc.parser_result,
-            "error": doc.parser_error,
-        }
-    if doc.media_type.startswith("image/"):
-        if page != 1:
-            raise DomainError("Seite nicht gefunden.", 404)
-        if image:
-            try:
-                with Image.open(io.BytesIO(data)) as original:
-                    if original.width * original.height > Image.MAX_IMAGE_PIXELS:
-                        raise ValueError("Bild zu groß für die Vorschau")
-                    preview = ImageOps.exif_transpose(original)
-                    preview.thumbnail((2000, 2000))
-                    output = io.BytesIO()
-                    preview.convert("RGB").save(output, format="PNG")
-                    return output.getvalue()
-            except Exception as e:
-                raise DomainError("Bildvorschau nicht lesbar; Original bleibt verfügbar.") from e
-        return {
-            "text": "",
-            "pages": 1,
-            "image_available": True,
-            "note": "Bildoriginal/Seitenansicht zur visuellen Auslese verwenden.",
-        }
-    try:
-        if image:
-            import pypdfium2 as pdfium
+    from .security import inspect_bytes
 
-            pdf = pdfium.PdfDocument(data)
-            if page > len(pdf):
-                raise DomainError("Seite nicht gefunden.", 404)
-            pdf_page = pdf[page - 1]
-            width, height = pdf_page.get_size()
-            if width <= 0 or height <= 0:
-                pdf_page.close()
-                pdf.close()
-                raise DomainError("Ungültige Seitengröße.")
-            bitmap = pdf_page.render(scale=min(1.5, 2000 / max(width, height)))
-            output = io.BytesIO()
-            bitmap.to_pil().save(output, format="PNG")
-            bitmap.close()
-            pdf_page.close()
-            pdf.close()
-            return output.getvalue()
-        reader = PdfReader(io.BytesIO(data))
-        if page > len(reader.pages):
-            raise DomainError("Seite nicht gefunden.", 404)
-        return {
-            "text": (reader.pages[page - 1].extract_text() or "")[:80000],
-            "page": page,
-            "pages": len(reader.pages),
-            "image_available": True,
-        }
-    except DomainError:
-        raise
-    except Exception as e:
-        raise DomainError(
-            "Seite nicht lesbar; Original ist weiterhin verfügbar.", details=str(e)[:500]
-        ) from e
+    return inspect_bytes(data, doc.media_type, page=page, image=image)

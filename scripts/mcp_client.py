@@ -65,6 +65,18 @@ async def wait_job(client, job_id):
     raise TimeoutError(f"Worker-Auftrag {job_id} nicht rechtzeitig abgeschlossen")
 
 
+async def wait_clean(client, document_id):
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        doc = await tool(client, "get_document", {"document_id": document_id})
+        if doc["security_status"] == "clean":
+            return doc
+        if doc["security_status"] in {"infected", "error"}:
+            raise RuntimeError(f"Scan {document_id}: {doc['security_error']}")
+        await asyncio.sleep(0.5)
+    raise TimeoutError(f"Sicherheitsprüfung {document_id} nicht rechtzeitig abgeschlossen")
+
+
 def sample_files(company_name, period):
     # Reuse the synthetic fixture helpers. Django setup here does not connect to a local DB.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
@@ -293,7 +305,7 @@ async def exercise(args, config):
                             break
                     assert len(documents) == len(fixtures)
                     for fixture in fixtures:
-                        doc = await tool(client, "get_document", {"document_id": fixture["id"]})
+                        doc = await wait_clean(client, fixture["id"])
                         await tool(
                             client,
                             "claim_document",

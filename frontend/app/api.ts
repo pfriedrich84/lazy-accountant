@@ -177,6 +177,9 @@ export interface Document {
   excluded_by_id?: number | null;
   packaged_in?: { id: string; version: number; revision: number }[];
   filed_path: string;
+  security_status: "pending" | "scanning" | "clean" | "infected" | "error";
+  security_error: string;
+  security_impact?: { package_ids: string[]; dispatch_ids: string[] };
   filing_status?: "pending" | "done";
   filing_error?: string;
   desired_path?: string;
@@ -211,6 +214,7 @@ export interface Package {
   size: number;
   created_at: string;
   snapshot?: Preview;
+  security_blocked?: { document_id: string; reason: string }[];
 }
 export interface Preview {
   company: { id: number; name: string; folder: string };
@@ -220,6 +224,12 @@ export interface Preview {
   allow_open_issues: boolean;
   documents: (Document & { archive_path: string })[];
   excluded: { document: Document; reason: string }[];
+  blocked_imports?: {
+    id: number;
+    document_id: string | null;
+    error: string;
+    security_status: string;
+  }[];
   schema_version?: number;
   intentional_exclusions?: { document: Document; reason: string }[];
   excluded_inbox?: string[];

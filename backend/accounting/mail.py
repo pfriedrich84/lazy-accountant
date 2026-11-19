@@ -22,7 +22,7 @@ from django.utils import timezone
 from . import storage
 from .auth import Actor, DomainError
 from .models import Dispatch, ImportSource, Job, Mailbox, SendAttempt
-from .packages import get_package, package_bytes
+from .packages import get_package, package_bytes, require_package_safe
 from .services import ingest
 
 SECRET_FIELDS = {"imap_password", "smtp_password"}
@@ -210,8 +210,11 @@ def import_message(actor, mailbox, uidvalidity, uid, raw):
                 )
             except DomainError as e:
                 # Unsupported attachments are not silently discarded. Preserve bounded original bytes.
-                relative = f"_rejected/{mailbox.id}/{identity}.bin"
-                storage.atomic_write(relative, data)
+                relative = f"_quarantine/rejected/{mailbox.id}/{identity}.bin"
+                if len(data) <= settings.MAX_FILE_BYTES:
+                    storage.atomic_write(relative, data)
+                else:
+                    relative = ""  # oversized attachment remains on the IMAP server
                 provenance.update(
                     {"preserved_path": relative, "sha256": storage.checksum(data), "bytes": len(data)}
                 )
@@ -326,6 +329,28 @@ def scan_mailbox(job, connector=None):
             pass
 
 
+def import_errors(actor, company_id):
+    from django.db.models import Q
+
+    actor.require(company_id)
+    rows = (
+        ImportSource.objects.filter(mailbox__company_id=company_id)
+        .filter(~Q(error="") | (Q(document__isnull=False) & ~Q(document__security_status="clean")))
+        .select_related("document")
+        .order_by("-id")[:200]
+    )
+    return [
+        {
+            "id": row.id,
+            "document_id": str(row.document_id) if row.document_id else None,
+            "provenance": {k: v for k, v in row.provenance.items() if k != "preserved_path"},
+            "security_status": row.document.security_status if row.document_id else "error",
+            "error": row.error or row.document.security_error or row.document.security_status,
+        }
+        for row in rows
+    ]
+
+
 def dispatch_data(d):
     return {
         "id": str(d.id),
@@ -343,6 +368,7 @@ def dispatch_data(d):
 
 def queue_dispatch(actor, package_id, idempotency_key, resend_of=None):
     package = get_package(actor, package_id, "send")
+    require_package_safe(package)
     if not idempotency_key or len(idempotency_key) > 120:
         raise DomainError("Idempotenzschlüssel erforderlich.")
     with transaction.atomic():
@@ -367,7 +393,9 @@ def queue_dispatch(actor, package_id, idempotency_key, resend_of=None):
             raise DomainError(
                 "Paket hat keine Empfänger; Einstellungen korrigieren und neue Paketversion erzeugen."
             )
-        if (snapshot["excluded"] or snapshot["unassigned_inbox"]) and not snapshot["allow_open_issues"]:
+        if (
+            snapshot["excluded"] or snapshot["unassigned_inbox"] or snapshot.get("blocked_imports")
+        ) and not snapshot["allow_open_issues"]:
             raise DomainError("Paket enthält offene Punkte. Versandregel erlaubt dies nicht.")
         mailbox = Mailbox.objects.filter(company=package.company).first()
         if not mailbox or not mailbox.smtp_host or not mailbox.sender:
@@ -390,6 +418,7 @@ def queue_dispatch(actor, package_id, idempotency_key, resend_of=None):
 
 def make_message(dispatch, mailbox, part, manifest, message_id):
     package = dispatch.package
+    require_package_safe(package)
     snapshot = package.snapshot
     substitutions = {
         "company": snapshot["company"]["name"],
@@ -482,6 +511,7 @@ def send_dispatch(job):
     dispatch = Dispatch.objects.select_related("package", "package__company").get(
         id=job.payload["dispatch_id"]
     )
+    require_package_safe(dispatch.package)
     Actor(job.actor_id).require(dispatch.package.company_id, "send")
     mailbox = Mailbox.objects.get(company_id=dispatch.package.company_id)
     manifest = {
@@ -494,6 +524,7 @@ def send_dispatch(job):
         ],
     }
     for part in dispatch.parts:
+        require_package_safe(dispatch.package)
         with transaction.atomic():
             attempt = SendAttempt.objects.select_for_update().get(dispatch=dispatch, part=part["number"])
             if attempt.status == "accepted":
@@ -536,6 +567,7 @@ def send_dispatch(job):
             )
         else:
             try:
+                require_package_safe(dispatch.package)
                 accepted = connection.send_messages([msg])
                 refused = getattr(connection, "refused_recipients", None)
                 attempt.status = "partial" if refused else "accepted" if accepted == 1 else "failed"
