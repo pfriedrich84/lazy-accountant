@@ -300,6 +300,15 @@ class BankTransaction(models.Model):
     remittance = models.TextField(blank=True)
     booked = models.BooleanField(default=False)
     reversal = models.BooleanField(default=False)
+    references = models.JSONField(default=dict)
+    review_points = models.JSONField(default=list)
+    reversal_of = models.OneToOneField(
+        "self", null=True, on_delete=models.PROTECT, related_name="bank_reversal"
+    )
+    reversal_applied_at = models.DateTimeField(null=True)
+    reversal_actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="bank_reversals"
+    )
     issues = models.JSONField(default=list)
     version = models.PositiveIntegerField(default=1)
 
@@ -365,6 +374,9 @@ class PaymentAllocation(models.Model):
         settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="reversed_allocations"
     )
     reversal_reason = models.CharField(max_length=1000, blank=True)
+    reversed_by_bank_transaction = models.ForeignKey(
+        BankTransaction, null=True, on_delete=models.PROTECT, related_name="reversed_allocations"
+    )
 
     class Meta:
         constraints = [models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_allocation")]

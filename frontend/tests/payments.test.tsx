@@ -75,6 +75,26 @@ describe("Bankabgleich", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("warnt bei ungeklärter Rückbuchung trotz bisheriger Zahlungszuordnung", async () => {
+    const original = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path, init) => {
+      const value = await original(path, init);
+      return path.includes("status/")
+        ? ({
+            ...(value as object),
+            status: "paid",
+            bank_evidence: "disputed",
+            assessment_notes: ["Teilrückbuchung ungeklärt"],
+          } as never)
+        : value;
+    });
+    panel();
+    expect(await screen.findByText("Bezahlt")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Bankdeckung nicht sicher: Teilrückbuchung ungeklärt/),
+    ).toBeInTheDocument();
+  });
+
   it("erfindet bei fehlender Fälligkeit keine Überfälligkeit", async () => {
     const original = vi.mocked(api).getMockImplementation()!;
     vi.mocked(api).mockImplementation(async (path, init) => {

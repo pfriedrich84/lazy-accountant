@@ -159,7 +159,7 @@ async def save_document_result(
 
 @server.tool()
 async def reconcile_bank_document(request: ReconcileRequest, ctx: Context) -> dict[str, Any]:
-    """Geprüftes CAMT normalisieren; eindeutige Referenz plus verifizierte Gegenpartei darf automatisch bestätigen."""
+    """Geprüftes CAMT abgleichen. Eindeutige Rechnungen bestätigen; gebuchte eindeutig referenzierte Vollrückbuchungen berichtigen Deckung auch bei auto_confirm=false. Unklare Bezüge nicht raten."""
     from .reconciliation import reconcile_document
 
     return await call(ctx, reconcile_document, **request.model_dump(mode="json"))

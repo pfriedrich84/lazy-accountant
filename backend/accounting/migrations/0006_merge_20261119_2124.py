@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounting', '0005_bank_reconciliation'),
-        ('accounting', '0005_document_handover_name_document_name_source'),
+        ("accounting", "0005_bank_reconciliation"),
+        ("accounting", "0005_document_handover_name_document_name_source"),
     ]
 
-    operations = [
-    ]
+    operations = []

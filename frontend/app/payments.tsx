@@ -30,6 +30,8 @@ export interface BankMovement {
   remittance: string;
   booked: boolean;
   reversal: boolean;
+  reversal_of_id?: string | null;
+  reversed_by_id?: string | null;
   issues: string[];
   sources: { document_id: string; locator: string }[];
 }
@@ -43,6 +45,7 @@ export interface PaymentStatus {
   due_date?: string;
   overdue: boolean | null;
   bank_evidence: string;
+  assessment_notes?: string[];
   as_of: string;
   allocations: {
     id: string;
@@ -52,6 +55,7 @@ export interface PaymentStatus {
     decision: string;
     reversed_at: string | null;
     reversal_reason: string;
+    reversal_sources?: { document_id: string; locator: string }[];
     reason: string;
   }[];
 }
@@ -162,7 +166,7 @@ export function PaymentPanel({ doc }: { doc: Document }) {
       retryKeys.current.clear();
       setNotice(
         variables.operation === "normalize"
-          ? "CAMT abgeglichen. Eindeutige Treffer wurden bestätigt; übrige Bewegungen unter Zahlungsstand prüfen."
+          ? "CAMT abgeglichen. Eindeutige Treffer wurden bestätigt und eindeutig referenzierte Rückbuchungen berücksichtigt; übrige Bewegungen unter Zahlungsstand prüfen."
           : "Gespeichert.",
       );
       await cache.invalidateQueries({
@@ -257,6 +261,11 @@ export function PaymentPanel({ doc }: { doc: Document }) {
               Bankdeckung: {status.data.bank_evidence}. Keine Zuordnung bedeutet
               nicht nachgewiesenes Nichtbezahltsein.
             </Typography>
+            {status.data.assessment_notes?.map((point) => (
+              <Alert key={point} severity="warning">
+                Bankdeckung nicht sicher: {point}
+              </Alert>
+            ))}
             {status.data.allocations.map((a) => (
               <Stack
                 key={a.id}
@@ -267,6 +276,14 @@ export function PaymentPanel({ doc }: { doc: Document }) {
                   {a.amount} · {a.decision} · {a.reason}
                   {a.reversed_at ? ` · aufgehoben: ${a.reversal_reason}` : ""}
                 </Typography>
+                {a.reversal_sources?.map((s) => (
+                  <Link
+                    key={s.document_id + s.locator}
+                    to={`/documents/${s.document_id}`}
+                  >
+                    Bankbeleg der Rückbuchung · {s.locator}
+                  </Link>
+                ))}
                 {!a.reversed_at && (
                   <Button
                     disabled={!canProcess || !reason.trim() || action.isPending}

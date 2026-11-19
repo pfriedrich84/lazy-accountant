@@ -83,6 +83,21 @@ def reconciliation_entries(data):
                     detail_direction = text(detail, "CdtDbtInd")
                     if detail_direction and detail_direction != direction:
                         issues.append("Abweichende Detailrichtung")
+                references = {}
+                if detail is not None:
+                    for key, path in {
+                        "transaction_id": "Refs/TxId",
+                        "end_to_end_id": "Refs/EndToEndId",
+                        "instruction_id": "Refs/InstrId",
+                    }.items():
+                        identifier = text(detail, path)
+                        if identifier and identifier.upper() not in {"NOTPROVIDED", "NONREF", "UNKNOWN"}:
+                            if len(identifier) > 300:
+                                raise ValueError("Überlange Bankreferenz")
+                            references[key] = identifier
+                return_info = detail is not None and detail.find("c:RtrInf", ns) is not None
+                if len(reference) > 300 or len(iban) > 100:
+                    raise ValueError("Überlange Bankkennung")
                 yield {
                     "locator": f"statement:{si}/entry:{ei}/detail:{ti}",
                     "own_iban": own_iban,
@@ -96,6 +111,7 @@ def reconciliation_entries(data):
                     "party_iban": iban.replace(" ", "").upper(),
                     "remittance": "\n".join(remittance),
                     "booked": status == "BOOK",
-                    "reversal": text(entry, "RvslInd").lower() == "true",
+                    "reversal": text(entry, "RvslInd").lower() == "true" or return_info,
+                    "references": references,
                     "issues": issues,
                 }

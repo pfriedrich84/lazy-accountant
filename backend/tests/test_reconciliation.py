@@ -36,6 +36,9 @@ def camt(
     party=PARTY,
     extra="",
     reversal=False,
+    txid="",
+    end_to_end_id="",
+    return_info=False,
 ):
     side = "Dbtr" if direction == "CRDT" else "Cdtr"
     return f"""<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.08">
@@ -43,6 +46,8 @@ def camt(
     <Ntry><Amt Ccy="EUR">{amount}</Amt><CdtDbtInd>{direction}</CdtDbtInd><Sts><Cd>{status}</Cd></Sts>
     <RvslInd>{str(reversal).lower()}</RvslInd><BookgDt><Dt>2026-10-15</Dt></BookgDt>
     <AcctSvcrRef>{reference}</AcctSvcrRef><NtryDtls><TxDtls>
+    <Refs><TxId>{txid}</TxId><EndToEndId>{end_to_end_id}</EndToEndId></Refs>
+    {"<RtrInf><Rsn><Cd>AC04</Cd></Rsn></RtrInf>" if return_info else ""}
     <RltdPties><{side}><Nm>Acme Customer</Nm></{side}><{side}Acct><Id><IBAN>{party}</IBAN></Id></{side}Acct></RltdPties>
     <RmtInf><Ustrd>{number}</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>{extra}
     </Stmt></BkToCstmrStmt></Document>""".encode()
@@ -459,6 +464,235 @@ def test_invoice_version_changed_since_preview(actor, companies):
     with pytest.raises(DomainError, match="Veraltete"):
         assign(actor, tx, inv, "40")
     assert not PaymentAllocation.objects.exists()
+
+
+@pytest.mark.parametrize("kind,direction", [("outgoing_invoice", "CRDT"), ("incoming_invoice", "DBIT")])
+def test_explicit_full_bank_reversal_reopens_invoice(actor, companies, kind, direction):
+    inv = invoice(actor, companies[0], kind)
+    original_doc = statement(actor, companies[0], camt(direction=direction))
+    normalize(actor, original_doc, auto=False)
+    original = BankTransaction.objects.get()
+    assign(actor, original, inv)
+    returned_direction = "DBIT" if direction == "CRDT" else "CRDT"
+    returned_doc = statement(actor, companies[0], camt(direction=returned_direction, reversal=True))
+    result = normalize(actor, returned_doc, auto=False)
+    assert len(result["applied_reversals"]) == 1
+    status = bank.payment_status(actor, inv["id"], "2026-10-21")
+    assert status["status"] == "unpaid" and status["overdue"]
+    assert status["bank_evidence"] == "none"
+    returned = BankTransaction.objects.get(reversal=True)
+    assert returned.reversal_of_id == original.id
+    assert status["allocations"][0]["reversed_by_bank_transaction_id"] == str(returned.id)
+    original.refresh_from_db()
+    assert Decimal(bank.transaction_data(original)["available"]) == 0
+    with pytest.raises(DomainError, match="Ungeklärte"):
+        assign(actor, original, inv)
+    assert not normalize(actor, returned_doc)["applied_reversals"]
+    assert not normalize(actor, original_doc)["confirmed"]
+    assert PaymentAllocation.objects.count() == 1
+
+
+@pytest.mark.parametrize("marker", ["reversal", "return_info"])
+def test_transaction_id_reference_can_prove_bank_return(actor, companies, marker):
+    inv = invoice(actor, companies[0])
+    normalize(actor, statement(actor, companies[0], camt(txid="TX-UNIQUE")), auto=False)
+    original = BankTransaction.objects.get()
+    assign(actor, original, inv)
+    result = normalize(
+        actor,
+        statement(
+            actor,
+            companies[0],
+            camt(
+                reference="RETURN-REF",
+                direction="DBIT",
+                txid="TX-UNIQUE",
+                **{marker: True},
+            ),
+        ),
+    )
+    assert len(result["applied_reversals"]) == 1
+    assert bank.payment_status(actor, inv["id"])["status"] == "unpaid"
+
+
+@pytest.mark.parametrize(
+    "case", ["amount", "party", "direction", "currency", "pending", "end_to_end_only", "no_marker"]
+)
+def test_unclear_returns_never_revoke_a_payment(actor, companies, case):
+    inv = invoice(actor, companies[0])
+    normalize(actor, statement(actor, companies[0], camt(txid="TX-1", end_to_end_id="E2E-1")), auto=False)
+    assign(actor, BankTransaction.objects.get(), inv)
+    kwargs = {"reference": "RETURN-REF", "direction": "DBIT", "txid": "TX-1", "reversal": True}
+    if case == "amount":
+        kwargs["amount"] = "40.00"
+    elif case == "party":
+        kwargs["party"] = OWN
+    elif case == "direction":
+        kwargs["direction"] = "CRDT"
+    elif case == "pending":
+        kwargs["status"] = "PDNG"
+    elif case == "end_to_end_only":
+        kwargs.update(txid="", end_to_end_id="E2E-1")
+    elif case == "no_marker":
+        kwargs["reversal"] = False
+    data = camt(**kwargs)
+    if case == "currency":
+        data = data.replace(b'Ccy="EUR"', b'Ccy="USD"')
+    result = normalize(actor, statement(actor, companies[0], data))
+    assert not result["applied_reversals"]
+    status = bank.payment_status(actor, inv["id"])
+    assert status["status"] == "paid"
+    assert not PaymentAllocation.objects.get().reversed_at
+    if case in {"amount", "party", "direction", "currency"}:
+        assert status["bank_evidence"] == "disputed" and status["assessment_notes"]
+
+
+def test_pending_return_becomes_booked_and_only_then_revokes(actor, companies):
+    inv = invoice(actor, companies[0])
+    normalize(actor, statement(actor, companies[0]), auto=False)
+    assign(actor, BankTransaction.objects.get(), inv)
+    args = {"direction": "DBIT", "reversal": True}
+    pending = statement(actor, companies[0], camt(status="PDNG", **args))
+    assert not normalize(actor, pending)["applied_reversals"]
+    assert bank.payment_status(actor, inv["id"])["status"] == "paid"
+    booked = statement(actor, companies[0], camt(status="BOOK", **args))
+    assert len(normalize(actor, booked)["applied_reversals"]) == 1
+    assert BankTransaction.objects.count() == 2
+    assert bank.payment_status(actor, inv["id"])["status"] == "unpaid"
+
+
+def test_return_before_original_prevents_later_payment_match(actor, companies):
+    inv = invoice(actor, companies[0])
+    bank.verify_party(actor, companies[0].id, "Acme Customer", PARTY, "Unabhängig geprüft")
+    returned = statement(actor, companies[0], camt(direction="DBIT", reversal=True))
+    assert not normalize(actor, returned)["applied_reversals"]
+    original = statement(actor, companies[0])
+    result = normalize(actor, original)
+    assert len(result["applied_reversals"]) == 1 and not result["confirmed"]
+    assert not PaymentAllocation.objects.exists()
+    assert bank.payment_status(actor, inv["id"])["status"] == "unpaid"
+
+
+def test_return_of_split_bank_payment_revokes_all_allocations(actor, companies):
+    inv1 = invoice(actor, companies[0], number="SPLIT-1", gross="40.00")
+    inv2 = invoice(actor, companies[0], number="SPLIT-2", gross="80.00")
+    normalize(actor, statement(actor, companies[0]), auto=False)
+    original = BankTransaction.objects.get()
+    assign(actor, original, inv1, "40")
+    assign(actor, original, inv2, "80")
+    normalize(actor, statement(actor, companies[0], camt(direction="DBIT", reversal=True)))
+    assert not PaymentAllocation.objects.filter(reversed_at__isnull=True).exists()
+    assert bank.payment_status(actor, inv1["id"])["status"] == "unpaid"
+    assert bank.payment_status(actor, inv2["id"])["status"] == "unpaid"
+
+
+def test_reversal_of_one_installment_leaves_other_payment_active(actor, companies):
+    inv = invoice(actor, companies[0])
+    for ref, amount in [("INSTALLMENT-1", "40.00"), ("INSTALLMENT-2", "80.00")]:
+        normalize(actor, statement(actor, companies[0], camt(reference=ref, amount=amount)), auto=False)
+        assign(actor, BankTransaction.objects.get(bank_reference=ref), inv, amount)
+    assert bank.payment_status(actor, inv["id"])["status"] == "paid"
+    normalize(
+        actor,
+        statement(
+            actor,
+            companies[0],
+            camt(reference="INSTALLMENT-1", amount="40.00", direction="DBIT", reversal=True),
+        ),
+    )
+    status = bank.payment_status(actor, inv["id"], "2026-10-21")
+    assert status["status"] == "partially_paid" and status["overdue"]
+    assert Decimal(status["paid"]) == 80 and Decimal(status["remaining"]) == 40
+    assert PaymentAllocation.objects.filter(reversed_at__isnull=True).count() == 1
+
+
+def test_multiple_originals_with_same_txid_remain_disputed(actor, companies):
+    inv = invoice(actor, companies[0])
+    for ref in ["BANK-1", "BANK-2"]:
+        normalize(actor, statement(actor, companies[0], camt(reference=ref, txid="REUSED")), auto=False)
+    original = BankTransaction.objects.filter(bank_reference="BANK-1").get()
+    assign(actor, original, inv)
+    result = normalize(
+        actor,
+        statement(
+            actor,
+            companies[0],
+            camt(
+                reference="RETURN",
+                direction="DBIT",
+                txid="REUSED",
+                reversal=True,
+            ),
+        ),
+    )
+    assert not result["applied_reversals"]
+    assert bank.payment_status(actor, inv["id"])["bank_evidence"] == "disputed"
+
+
+def test_two_return_movements_with_same_target_do_not_arbitrarily_pick_one(actor, companies):
+    inv = invoice(actor, companies[0])
+    normalize(actor, statement(actor, companies[0], camt(txid="TX-1")), auto=False)
+    assign(actor, BankTransaction.objects.get(), inv)
+    second = (
+        camt(reference="RETURN-2", direction="DBIT", txid="TX-1", reversal=True)
+        .decode()
+        .split("<Ntry>")[1]
+        .split("</Ntry>")[0]
+    )
+    data = camt(
+        reference="RETURN-1",
+        direction="DBIT",
+        txid="TX-1",
+        reversal=True,
+        extra="<Ntry>" + second + "</Ntry>",
+    )
+    result = normalize(actor, statement(actor, companies[0], data))
+    assert not result["applied_reversals"]
+    assert not PaymentAllocation.objects.get().reversed_at
+    assert bank.payment_status(actor, inv["id"])["bank_evidence"] == "disputed"
+
+
+def test_reversal_cannot_match_other_company_or_account(actor, companies):
+    inv = invoice(actor, companies[0])
+    normalize(actor, statement(actor, companies[0], camt(txid="SAME-ID")), auto=False)
+    assign(actor, BankTransaction.objects.get(), inv)
+    other = statement(
+        actor, companies[1], camt(iban=PARTY, party=OWN, direction="DBIT", txid="SAME-ID", reversal=True)
+    )
+    assert not normalize(actor, other)["applied_reversals"]
+    assert bank.payment_status(actor, inv["id"])["status"] == "paid"
+
+
+def test_reversal_generates_payment_only_supplement(actor, companies):
+    inv = invoice(actor, companies[0])
+    normalize(actor, statement(actor, companies[0]), auto=False)
+    assign(actor, BankTransaction.objects.get(), inv)
+    before = packages.create_package(actor, companies[0].id, ["2026-10"], "paid-before-return")
+    frozen = packages.package_bytes(packages.get_package(actor, before["id"]))
+    normalize(actor, statement(actor, companies[0], camt(direction="DBIT", reversal=True)))
+    after = packages.create_package(actor, companies[0].id, ["2026-10"], "after-return", before["id"])
+    assert inv["id"] in after["snapshot"]["payment_changes"]
+    payment = next(p for p in after["snapshot"]["payments"] if p["document_id"] == inv["id"])
+    assert payment["status"] == "unpaid" and payment["allocations"][0]["reversal_sources"]
+    assert packages.package_bytes(packages.get_package(actor, before["id"])) == frozen
+
+
+def test_prior_draft_return_identity_migration_keeps_sources(actor, companies):
+    import importlib
+    from types import SimpleNamespace
+
+    from django.apps import apps
+    from django.db import connection
+
+    doc = statement(actor, companies[0], camt(reference="RETURN", direction="DBIT", reversal=True))
+    normalize(actor, doc)
+    observed = BankTransaction.objects.get()
+    BankTransaction.objects.filter(id=observed.id).update(identity=bank.digest(["RETURN"]))
+    migration = importlib.import_module("accounting.migrations.0007_explicit_bank_reversals")
+    migration.rekey_existing_reversals(apps, SimpleNamespace(connection=connection))
+    normalize(actor, doc)
+    assert BankTransaction.objects.count() == 1
+    assert BankTransactionSource.objects.get().transaction_id == observed.id
 
 
 @pytest.mark.django_db(transaction=True)

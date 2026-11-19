@@ -14,7 +14,10 @@ class BankRequest(BaseModel):
 class ReconcileRequest(BankRequest):
     document_id: UUID
     base_version: int = Field(ge=1, strict=True)
-    auto_confirm: bool = True
+    auto_confirm: bool = Field(
+        default=True,
+        description="Neue eindeutige Rechnungszuordnungen bestätigen. Eindeutig gebuchte Bankrückbuchungen berichtigen vorhandene Deckung unabhängig davon.",
+    )
 
 
 class AllocationRequest(BankRequest):

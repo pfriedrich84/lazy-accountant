@@ -36,7 +36,7 @@ class Command(BaseCommand):
                         actor,
                         str(doc.id),
                         doc.version,
-                        f"backfill-v1:{doc.id}:{doc.version}:{options['auto_confirm']}",
+                        f"backfill-v2:{doc.id}:{doc.version}:{options['auto_confirm']}",
                         options["auto_confirm"],
                     )
                     report["documents"].append({"document_id": str(doc.id), **result})

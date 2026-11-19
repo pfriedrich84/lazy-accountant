@@ -115,12 +115,22 @@ export default function Payments() {
                       : "Nicht überfällig"}{" "}
                   · Bankdeckung: {i.bank_evidence} · Stand {i.as_of}
                 </Typography>
+                {i.assessment_notes?.map((point) => (
+                  <Alert key={point} severity="warning">
+                    Bankdeckung nicht sicher: {point}
+                  </Alert>
+                ))}
               </Stack>
             </Paper>
           ))}
       {mode === "transactions" &&
         movements.data?.items
-          .filter((t) => filter === "all" || t.available !== "0.000000")
+          .filter(
+            (t) =>
+              filter === "all" ||
+              Number(t.available) > 0 ||
+              t.issues.length > 0,
+          )
           .map((t) => (
             <Paper key={t.id} sx={{ p: 2 }}>
               <Stack spacing={1}>
@@ -133,8 +143,13 @@ export default function Payments() {
                 </Typography>
                 <Typography>
                   {t.booked ? "Gebucht" : "Buchungsstatus ungeklärt/ausstehend"}
+                  {t.reversed_by_id
+                    ? " · durch Bank rückgebucht, nicht mehr verfügbar"
+                    : ""}
                   {t.reversal
-                    ? " · Rückbuchung: Zuordnungen manuell prüfen"
+                    ? t.reversal_of_id
+                      ? " · Rückbuchung eindeutig berücksichtigt"
+                      : " · Rückbuchung: Bezug manuell prüfen"
                     : ""}
                 </Typography>
                 {t.issues.length > 0 && (
