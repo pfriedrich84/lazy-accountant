@@ -18,6 +18,7 @@ urlpatterns = [
     path("api/documents/", api.Documents.as_view()),
     path("api/documents/<uuid:document_id>/", api.DocumentDetail.as_view()),
     path("api/documents/<uuid:document_id>/<str:representation>/", api.DocumentFile.as_view()),
+    path("api/reconciliation/<str:action>/", api.Reconciliation.as_view()),
     path("api/packages/", api.Packages.as_view()),
     path("api/packages/preview/", api.Preview.as_view()),
     path("api/packages/<uuid:package_id>/", api.PackageDetail.as_view()),

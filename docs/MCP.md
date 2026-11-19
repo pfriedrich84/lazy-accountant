@@ -19,6 +19,10 @@ Weboberfläche, API und MCP liegen auf derselben internen HTTP-Origin. Der absch
 
 Der ASGI-Zugang authentifiziert jeden HTTP-Aufruf. Tools prüfen Token, Mitgliedschaft und Funktionsrechte erneut über denselben Service-Layer wie REST. Django-Datenbankverbindungen werden auch außerhalb des Request-Handlers am Ende der MCP-Aufrufe geschlossen.
 
+## Bankabgleich (Draft-Ausbau zu #10)
+
+Die zusätzlichen Werkzeuge für CAMT-Normalisierung, erklärbare Kandidaten, Bank-/Rechnungslisten, Zuordnung, Aufhebung und explizite Bankdatenfreigabe sind mit Schemas, Rechten und Grenzen im [Bankabgleich-Vertrag](BANK_RECONCILIATION.md#rest-und-mcp) dokumentiert. Schreibaufträge verwenden `request` als Schemaobjekt, Beträge als Dezimalstrings und für finanzwirksame Änderungen Versionsprüfung/Idempotenz. Keine Überweisung oder Mahnung auslösen. `reconcile_bank_document` darf auf autorisierten Auftrag eindeutige Treffer bestätigen; mehrdeutige oder ungeklärte Quellen bleiben offen.
+
 ## Tatsächliche Werkzeuge
 
 Die aktuellen JSON-Schemas werden durch die offiziellen SDK-Dekoratoren aus Typannotationen/Pydantic erstellt und über `tools/list` veröffentlicht, nicht nur in Markdown beschrieben.

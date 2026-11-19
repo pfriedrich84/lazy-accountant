@@ -171,6 +171,61 @@ class DocumentDetail(APIView):
         return Response(services.save_result(request_actor(request), payload))
 
 
+class Reconciliation(APIView):
+    def get(self, request, action):
+        from . import reconciliation as bank
+
+        actor = request_actor(request)
+        p = request.query_params
+        if action == "verified-parties":
+            return Response(bank.list_verified_parties(actor, int(p["company_id"])))
+        if action == "status":
+            return Response(bank.payment_status(actor, p["document_id"], p.get("as_of")))
+        if action == "candidates":
+            return Response(bank.candidates(actor, p["transaction_id"]))
+        if action == "transactions":
+            return Response(
+                bank.list_transactions(actor, int(p["company_id"]), p.get("cursor", 0), p.get("limit", 50))
+            )
+        if action == "invoices":
+            return Response(
+                bank.list_invoice_statuses(
+                    actor, int(p["company_id"]), p.get("cursor", 0), p.get("limit", 50)
+                )
+            )
+        raise DomainError("Operation nicht gefunden.", 404)
+
+    def post(self, request, action):
+        from pydantic import ValidationError
+
+        from . import reconciliation as bank
+        from .payment_schemas import (
+            AllocationRequest,
+            ReconcileRequest,
+            ReverseAllocationRequest,
+            RevokePartyRequest,
+            VerifyPartyRequest,
+        )
+
+        operations = {
+            "normalize": (ReconcileRequest, bank.reconcile_document),
+            "allocate": (AllocationRequest, bank.allocate),
+            "reverse": (ReverseAllocationRequest, bank.reverse_allocation),
+            "verify-party": (VerifyPartyRequest, bank.verify_party),
+            "revoke-party": (RevokePartyRequest, bank.revoke_party),
+        }
+        if action not in operations:
+            raise DomainError("Operation nicht gefunden.", 404)
+        schema, function = operations[action]
+        try:
+            payload = schema.model_validate(request.data).model_dump(mode="json")
+        except ValidationError as exc:
+            raise DomainError(
+                "Ungültiger Zahlungsauftrag.", details=exc.errors(include_context=False)
+            ) from exc
+        return Response(function(request_actor(request), **payload))
+
+
 class DocumentFile(APIView):
     def get(self, request, document_id, representation):
         actor = request_actor(request)

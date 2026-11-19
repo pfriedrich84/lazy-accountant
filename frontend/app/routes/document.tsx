@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { ErrorAlert, Heading, Loading, Status } from "../components";
 import { useApp } from "./shell";
+import { PaymentPanel } from "../payments";
 
 function Editor({ doc }: { doc: Document }) {
   const { companies, period: activePeriod } = useApp();
@@ -283,6 +284,7 @@ function Editor({ doc }: { doc: Document }) {
           </Accordion>
         </Paper>
         <Stack spacing={2}>
+          <PaymentPanel doc={doc} />
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" sx={{ mb: 2 }}>
               Zuordnung & Prüfung

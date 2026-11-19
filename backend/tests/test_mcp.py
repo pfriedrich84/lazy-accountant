@@ -324,3 +324,88 @@ def test_explicit_mcp_imap_works_with_checkbox_off_but_requires_process_scope(mc
     assert scan.call_count == 2 and Job.objects.filter(kind="imap").count() == 1
     mailbox.refresh_from_db()
     assert not mailbox.enabled
+
+
+@pytest.mark.django_db(transaction=True)
+def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
+    from accounting.models import BankTransaction, PaymentAllocation
+    from test_reconciliation import invoice, statement
+
+    company = companies[0]
+    inv = invoice(actor, company)
+    doc = statement(actor, company)
+    token = issue_token(actor, "bank", [company.id], ["read", "process"])["token"]
+    readonly = issue_token(actor, "read", [company.id], ["read"])["token"]
+
+    async def scenario():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+
+                async def call(name, arguments):
+                    response = await client.call_tool(name, arguments)
+                    assert not response.is_error, response
+                    value = response.structured_content
+                    return value["result"] if value and set(value) == {"result"} else value
+
+                result = await call(
+                    "reconcile_bank_document",
+                    {
+                        "request": {
+                            "document_id": doc["id"],
+                            "base_version": doc["version"],
+                            "auto_confirm": False,
+                            "idempotency_key": "mcp-normalize",
+                        }
+                    },
+                )
+                txid = result["transaction_ids"][0]
+                rows = await call("list_bank_transactions", {"company_id": company.id})
+                tx = rows["items"][0]
+                assert tx["id"] == txid
+                await call(
+                    "confirm_payment_allocation",
+                    {
+                        "request": {
+                            "transaction_id": txid,
+                            "document_id": inv["id"],
+                            "amount": "40.00",
+                            "bank_version": tx["version"],
+                            "document_version": inv["version"],
+                            "reason": "Originalquelle manuell geprüft",
+                            "idempotency_key": "mcp-allocate",
+                        }
+                    },
+                )
+                status = await call(
+                    "get_invoice_payment_status", {"document_id": inv["id"], "as_of": "2026-10-21"}
+                )
+                assert status["status"] == "partially_paid" and status["overdue"]
+                assert status["allocations"][0]["evidence"]["document_version"] == inv["version"]
+                await call(
+                    "reverse_payment_allocation",
+                    {
+                        "request": {
+                            "allocation_id": status["allocations"][0]["id"],
+                            "bank_version": 2,
+                            "reason": "Rückbuchung im Original geprüft",
+                            "idempotency_key": "mcp-reverse",
+                        }
+                    },
+                )
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + readonly}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                denied = await client.call_tool(
+                    "reconcile_bank_document",
+                    {
+                        "request": {
+                            "document_id": doc["id"],
+                            "base_version": doc["version"],
+                            "idempotency_key": "denied",
+                        }
+                    },
+                )
+                assert denied.is_error
+
+    asyncio.run(scenario())
+    assert BankTransaction.objects.count() == 1
+    assert PaymentAllocation.objects.get().reversed_at

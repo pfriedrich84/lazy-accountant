@@ -24,6 +24,10 @@ Für das private LAN `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MCP_ALLOWED_HOSTS
 
 Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel deployen; beim Update erneut bauen. Die privaten Konfigurationswerte aus `.env` in Dockhand übernehmen (alternativ `.env.example` mit frisch erzeugten starken Secrets ausfüllen). Kein `DOCUMENTS_ROOT`, kein Host-`chown` und keine Anpassung an die Benutzer-ID des Docker-Hosts nötig. Docker erzeugt die Volumes `documents` und `postgres` mit dem Stack-Projektpräfix. Für einen späteren Netzwerkspeicher nur die Definition des Dokumentvolumes ändern, nicht den Anwendungspfad `/data`; vorhandene Daten vorher konsistent migrieren, siehe [Betrieb](docs/OPERATIONS.md#dokumentvolume-und-späterer-netzwerkspeicher).
 
+## Bankabgleich (Draft-Ausbau zu #10)
+
+Ein erster CAMT-basierter Zahlungsstand für importierte Ein- und Ausgangsrechnungen ist unter **Zahlungsstand** und im Dokumentdetail verfügbar. Eindeutige Referenztreffer mit unabhängig verifizierter Gegenpartei/IBAN dürfen automatisch bestätigt werden; Teilzahlungen und Aufhebung sind manuell möglich. Überfälligkeit wird nur angezeigt. Grenzen, Rechte, Migration und verbleibende Arbeit: [Bankabgleich](docs/BANK_RECONCILIATION.md). Kein PDF-only-Abgleich, kein Mahnversand, keine vollständige Erledigung von #10.
+
 ## Erster Ablauf
 
 1. Firma anlegen, sicheren eindeutigen Ordnernamen wählen; Konto/Depot, Kategorien und Steuerberater-Empfänger hinterlegen.

@@ -427,6 +427,9 @@ def save_result(actor, payload, source="manual"):
             duplicate = get_document(actor, result.duplicate_of)
             if duplicate.id == doc.id or duplicate.company_id != result.company_id:
                 raise DomainError("Ungültige Dublettenverknüpfung.")
+        from .reconciliation import guard_document_change
+
+        guard_document_change(doc, result)
         metadata = result.metadata.model_dump(mode="json")
         issues = validation_issues(
             result.kind, result.company_id, result.period, result.account_id, metadata, doc.parser_error

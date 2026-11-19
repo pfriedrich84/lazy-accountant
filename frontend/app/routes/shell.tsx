@@ -40,6 +40,7 @@ const navigation = [
   ["/", "Übersicht", "◫"],
   ["/documents", "Dokumenteingang", "↓"],
   ["/months", "Monatsablage", "▤"],
+  ["/payments", "Zahlungsstand", "€"],
   ["/packages", "Übergabe & Versand", "↗"],
   ["/settings", "Einstellungen", "⚙"],
 ];
