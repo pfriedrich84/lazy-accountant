@@ -177,22 +177,56 @@ async def reconcile_bank_document(request: ReconcileRequest, ctx: Context) -> di
 
 @server.tool()
 async def list_bank_transactions(
-    company_id: int, ctx: Context, cursor: int = 0, limit: int = 50
+    company_id: int,
+    ctx: Context,
+    cursor: int = 0,
+    limit: int = 50,
+    state: str = "all",
+    account_id: int | None = None,
+    direction: str | None = None,
+    search: str = "",
 ) -> dict[str, Any]:
-    """Bankbewegungen mit Quellen, verfügbaren Beträgen und Prüfpunkten paginiert lesen."""
+    """Firmenweit vor Pagination filtern: all/open/unallocated/review/pending/reversed; optional Konto, Richtung, Suchtext. review_reasons erklärt Prüffälle. Keine Zahlungsautorisierung."""
     from .reconciliation import list_transactions
 
-    return await call(ctx, list_transactions, company_id, cursor, limit)
+    return await call(
+        ctx,
+        list_transactions,
+        company_id,
+        cursor,
+        limit,
+        state=state,
+        account_id=account_id,
+        direction=direction,
+        search=search,
+    )
 
 
 @server.tool()
 async def list_invoice_payment_statuses(
-    company_id: int, ctx: Context, cursor: int = 0, limit: int = 50
+    company_id: int,
+    ctx: Context,
+    cursor: int = 0,
+    limit: int = 50,
+    state: str = "all",
+    kind: str | None = None,
+    search: str = "",
+    as_of: str | None = None,
 ) -> dict[str, Any]:
-    """Offene Posten und Zahlungsstatus für importierte ER/AR paginiert lesen; keine Mahnungen auslösen."""
+    """Firmenweite OP-Filter vor Pagination: all/open/overdue/unresolved/review/unmatched/paid/partially_paid; ER/AR, Suche, Stichtag. review_reasons erklärt Prüfbedarf. Keine Mahnungen."""
     from .reconciliation import list_invoice_statuses
 
-    return await call(ctx, list_invoice_statuses, company_id, cursor, limit)
+    return await call(
+        ctx,
+        list_invoice_statuses,
+        company_id,
+        cursor,
+        limit,
+        state=state,
+        kind=kind,
+        search=search,
+        as_of=as_of,
+    )
 
 
 @server.tool()

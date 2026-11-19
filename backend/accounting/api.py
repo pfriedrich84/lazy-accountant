@@ -186,12 +186,28 @@ class Reconciliation(APIView):
             return Response(bank.candidates(actor, p["transaction_id"]))
         if action == "transactions":
             return Response(
-                bank.list_transactions(actor, int(p["company_id"]), p.get("cursor", 0), p.get("limit", 50))
+                bank.list_transactions(
+                    actor,
+                    int(p["company_id"]),
+                    p.get("cursor", 0),
+                    p.get("limit", 50),
+                    state=p.get("state", "all"),
+                    account_id=p.get("account_id"),
+                    direction=p.get("direction"),
+                    search=p.get("search", ""),
+                )
             )
         if action == "invoices":
             return Response(
                 bank.list_invoice_statuses(
-                    actor, int(p["company_id"]), p.get("cursor", 0), p.get("limit", 50)
+                    actor,
+                    int(p["company_id"]),
+                    p.get("cursor", 0),
+                    p.get("limit", 50),
+                    state=p.get("state", "all"),
+                    kind=p.get("kind"),
+                    search=p.get("search", ""),
+                    as_of=p.get("as_of"),
                 )
             )
         raise DomainError("Operation nicht gefunden.", 404)

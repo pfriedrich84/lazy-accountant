@@ -442,6 +442,25 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                     "get_invoice_payment_status", {"document_id": inv["id"], "as_of": "2026-10-21"}
                 )
                 assert status["status"] == "partially_paid" and status["overdue"]
+                filtered = await call(
+                    "list_invoice_payment_statuses",
+                    {
+                        "company_id": company.id,
+                        "state": "overdue",
+                        "as_of": "2026-10-21",
+                        "search": "INV-001",
+                        "limit": 1,
+                    },
+                )
+                assert filtered["items"][0]["document_id"] == inv["id"]
+                assert filtered["as_of"] == "2026-10-21"
+                assert not (
+                    await call("list_bank_transactions", {"company_id": company.id, "state": "pending"})
+                )["items"]
+                invalid = await client.call_tool(
+                    "list_invoice_payment_statuses", {"company_id": company.id, "state": "invented"}
+                )
+                assert invalid.is_error and "400" in str(invalid)
                 assert status["allocations"][0]["evidence"]["document_version"] == inv["version"]
                 for source in (inv, doc):
                     denied = await client.call_tool(

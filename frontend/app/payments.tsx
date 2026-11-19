@@ -20,6 +20,7 @@ import {
 import { ErrorAlert } from "./components";
 
 export interface BankMovement {
+  review_reasons?: string[];
   id: string;
   version: number;
   amount: string;
