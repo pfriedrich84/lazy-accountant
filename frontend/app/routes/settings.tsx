@@ -479,11 +479,15 @@ function MailEditor({
                   }
                 />
               }
-              label="Regelmäßigen IMAP-Abruf aktivieren"
+              label="Nächtlichen IMAP-Abruf aktivieren"
             />
             <Alert severity="info">
-              Dediziertes Belegpostfach oder gezielter Ordner empfohlen.
-              Nachrichten werden nicht gelöscht. Ohne Aliasregel ist das
+              Nur mit diesem Haken: automatischer Abruf einmal pro Nacht ab
+              03:00 Uhr (Europe/Vienna). Ohne Haken kein automatischer Abruf.
+              „IMAP jetzt abrufen“ und ausdrückliche MCP-Aufrufe bleiben in
+              beiden Fällen möglich. Größere Eingänge werden in Teilabrufen
+              abgearbeitet. Dediziertes Belegpostfach oder
+              gezielter Ordner empfohlen. Nachrichten werden nicht gelöscht. Ohne Aliasregel ist das
               Postfach eindeutig dieser Firma zugeordnet.
             </Alert>
             <Typography variant="caption">

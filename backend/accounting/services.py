@@ -257,7 +257,10 @@ def list_documents(
 
 def detect_media(data, name):
     suffix = name.lower().rsplit(".", 1)[-1]
-    if data.startswith(b"%PDF-"):
+    # Bank exports may prepend printer/control records before the PDF header.
+    # Search only the first 1024 bytes, not arbitrary embedded PDF content.
+    # Keep the original bytes intact (including the prefix) for parsing/storage.
+    if b"%PDF-" in data[:1024]:
         return "application/pdf", ".pdf"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png", ".png"

@@ -39,7 +39,8 @@ Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel 
    ```
 
 5. Unter **Übergabe & Versand** Vorschau prüfen und Paket verbindlich erzeugen. ZIP enthält Originale, CSV, XLSX, Begleitschreiben und Inhaltsliste mit Prüfsummen. Fehlende/ausgeschlossene Unterlagen und Empfänger bleiben sichtbar.
-6. SMTP konfigurieren und den gespeicherten Snapshot ausdrücklich versenden. `SMTP angenommen` ist **keine bestätigte Zustellung**. Ein unbekannter Ausgang wird nicht automatisch erneut gesendet; Neuversand ist eine erkennbare, protokollierte Aktion.
+6. Optional unter **Einstellungen → IMAP & SMTP** das Belegpostfach samt Importbeginn einrichten und **nächtlichen IMAP-Abruf** aktivieren. Automatischer Start einmal pro Nacht ab **03:00 Uhr Europe/Vienna**; große Rückstände werden in begrenzten Teilabrufen abgearbeitet. Manueller Abruf bleibt jederzeit möglich. Importierte Anhänge starten noch keinen KI-Agenten automatisch.
+7. SMTP konfigurieren und den gespeicherten Snapshot ausdrücklich versenden. `SMTP angenommen` ist **keine bestätigte Zustellung**. Ein unbekannter Ausgang wird nicht automatisch erneut gesendet; Neuversand ist eine erkennbare, protokollierte Aktion.
 
 <details>
 <summary>Screenshot aus dem tatsächlichen synthetischen Compose-Browsertest</summary>
