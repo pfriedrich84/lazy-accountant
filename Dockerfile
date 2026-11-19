@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6=14.2
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv==0.13.9 \
     && useradd --uid 1000 --create-home accountant \
-    && mkdir /data && chown accountant:accountant /data
+    && mkdir -m 700 /data && chown accountant:accountant /data
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY backend/ ./backend/

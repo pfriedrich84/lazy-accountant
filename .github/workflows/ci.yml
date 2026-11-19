@@ -64,13 +64,31 @@ jobs:
           node-version: 26.13.1
       - run: uv sync --locked && python3 scripts/init-env.py
       - run: docker compose --profile test-mail up --build -d --wait
+      - name: Named volume shared by non-root services and published host port
+        run: |
+          docker compose exec -T app python -c 'import os, stat; from pathlib import Path; p = Path("/data"); assert os.getuid() == 1000; assert p.stat().st_uid == 1000; assert stat.S_IMODE(p.stat().st_mode) == 0o700; (p / ".volume-smoke").write_text("shared-non-root")'
+          docker compose exec -T worker python -c 'import os; from pathlib import Path; p = Path("/data/.volume-smoke"); assert os.getuid() == 1000; assert p.read_text() == "shared-non-root"; p.unlink()'
+          python3 - <<'PY'
+          import json, subprocess
+          def container(service):
+              id = subprocess.check_output(["docker", "compose", "ps", "-q", service], text=True).strip()
+              return json.loads(subprocess.check_output(["docker", "inspect", id]))[0]
+          app, worker = container("app"), container("worker")
+          def volume(container):
+              mount = next(m for m in container["Mounts"] if m["Destination"] == "/data")
+              assert mount["Type"] == "volume"
+              return mount["Name"]
+          assert volume(app) == volume(worker)
+          assert {"HostIp": "0.0.0.0", "HostPort": "8000"} in app["NetworkSettings"]["Ports"]["8000/tcp"]
+          print("Gemeinsames Docker-Volume, private Rechte, Nicht-root-Zugriff und veröffentlichter Port bestätigt.")
+          PY
       - name: Real MCP, IMAP, ORM worker and multipart SMTP month
         run: uv run python scripts/mcp_client.py --exercise --mail --report var/compose-report.json
       - name: Prepare browser fixtures
         run: |
           docker compose exec -T app python backend/manage.py bootstrap --sample-month 2026-10 --output /data/samples
           mkdir -p var/samples
-          cp -r var/documents/samples/. var/samples/
+          docker compose cp app:/data/samples/. var/samples/
           cd frontend && npm ci && npx playwright install --with-deps chromium
       - name: Browser upload-review-package, desktop and mobile
         run: |

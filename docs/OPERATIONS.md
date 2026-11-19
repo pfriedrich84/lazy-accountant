@@ -7,10 +7,14 @@
 - `db`: PostgreSQL 18.7, nur im Compose-Netz, benanntes Volume unter `/var/lib/postgresql` (Layout von PostgreSQL 18).
 - `mail-test`: ausschließlich optionales Profil `test-mail`, GreenMail 2.1.15 mit **synthetischen** Testzugängen und loopbackgebundenen Ports. Nicht für echte Firmenpost verwenden.
 
-`DOCUMENTS_ROOT` ist ein echter Host-Bind-Mount. Eigentümer `APP_UID:APP_GID` muss darin schreiben dürfen; `scripts/init-env.py` übernimmt die lokale Benutzer-/Gruppen-ID und legt den Pfad an. Bei Ausführung des Initialisierungsskripts als root werden stattdessen UID/GID 1000 verwendet und der leere Ablageordner passend übereignet; der App-Einstieg verweigert UID 0. Ein fehlender Hostpfad wird bewusst nicht von Docker als root angelegt (`create_host_path: false`). Auf einem anderen Host UID/GID/Pfad prüfen.
+### Dokumentvolume und späterer Netzwerkspeicher
+
+Die Dokumentablage ist das **benannte Docker-Volume `documents`**, gemeinsam an `/data` in App und Worker eingebunden. Docker legt es automatisch mit dem Stack-Projektpräfix an (standardmäßig `lazy-accountant_documents`). Das Image liefert das leere Verzeichnis mit Eigentümer `1000:1000` und Modus `0700`; beim erstmaligen Befüllen des lokalen Volumes übernimmt Docker diese Rechte. App und Worker laufen fest als `1000:1000`, unabhängig vom Hostbenutzer. Keine Hostordneranlage und kein privilegierter Init-Container nötig; der App-Einstieg verweigert UID 0. `init-env.py` erzeugt ausschließlich die private Konfiguration. Alte Variablen `DOCUMENTS_ROOT`, `APP_UID` und `APP_GID` werden von Compose nicht mehr verwendet.
+
+Der Host-Port `HTTP_PORT` (Standard `8000`) wird standardmäßig über `HTTP_BIND=0.0.0.0` veröffentlicht. Zugriff nur aus dem vorgesehenen privaten Netz zulassen und tatsächliche Server-IP/Hostnamen in den Host-/Origin-Allowlisten konfigurieren. Für ausschließlich lokalen Zugriff `HTTP_BIND=127.0.0.1` setzen. PostgreSQL bleibt unveröffentlicht.
 
 ```text
-<DOCUMENTS_ROOT>/
+/data/  (Dokumentvolume)
   <eindeutiger-Firmenordner>/YYYY/MM/{ER,AR,Bankkonto,Wertpapiere}/
   _originals/    unveränderliche führende Originaldateien
   _inbox/       noch nicht vollständig zugeordnete Eingänge
@@ -19,6 +23,21 @@
   _uploads/     noch nicht abgeschlossene authentifizierte Transfers
   _rejected/    erhaltene nicht unterstützte Mailanhänge
 ```
+
+Das Volume bleibt bei Container-Neubau, Neustart und normalem `docker compose down` erhalten. **`docker compose down -v` oder das Löschen des Volumes entfernt die gespeicherten Daten.** Kein Backupersatz.
+
+Für einen späteren Netzwerk-Mount ein geeignetes Docker-Volume mit NFS-/CIFS-Treiberoptionen auf dem Docker-Host/Dockhand vorbereiten. Beispielsweise kann die bestehende Definition durch ein bereits eingerichtetes externes Volume ersetzt werden:
+
+```yaml
+volumes:
+  documents:
+    external: true
+    name: lazy-accountant-documents-netzwerk
+```
+
+App und Worker behalten `documents:/data`. Der Netzwerkpfad muss für UID/GID `1000:1000` mit privaten Rechten nutzbar sein; Schreib-/Rename-/Sync-Verhalten und Ausfälle mit dem konkreten NAS gesondert prüfen. Dies ist keine behauptete NFS-/CIFS-Live-Abnahme. PostgreSQL bleibt auf seinem separaten lokalen Volume.
+
+**Bestehende Ablage nicht einfach umhängen:** Vor dem Wechsel vom früheren Host-Bind-Mount oder auf ein neues Netzwerkvolume mit der alten Konfiguration ein gemeinsames Backup erstellen, App/Worker stoppen und erst dann Konfiguration wechseln. Das neue Volume ist zunächst leer; der frühere Hostordner wird nicht automatisch importiert. Neues Image nur bauen (`docker compose build app`), dann über `scripts/restore.sh` den gesicherten Datenbank-/Dateistand gemeinsam in die neue Konfiguration zurückspielen und Integrität prüfen, bevor normal gearbeitet wird. Alten Speicher und Notfallbackup bis zur erfolgreichen Prüfung behalten. Bei bestehenden `.env` für LAN-Zugriff zusätzlich den bisherigen Loopback-Wert von `HTTP_BIND` bewusst anpassen.
 
 Keine dieser Dateien wird direkt als öffentlicher Webpfad freigegeben. Downloads laufen nur über berechtigte Dokument-/Paket-IDs. Pfade werden serverseitig aus validierten Zuordnungen erzeugt; Originaldateinamen bleiben zusätzlich in den Metadaten erhalten. Niemals Originale oder Paketdateien extern umbenennen/überschreiben.
 
@@ -91,7 +110,7 @@ sh scripts/backup.sh backups/2026-11-18
 Das Skript stoppt **beide schreibenden Dienste**, wartet deren geordnetes Ende ab (`stop_grace_period: 6m`), führt Journalreparatur/Integritätsprüfung aus und sichert:
 
 1. PostgreSQL als Custom-Dump (`database.dump`).
-2. Den gesamten Bind-Mount einschließlich Eingang, Originalen, Ordnern, Paketständen und Mailteilen (`documents.tar`).
+2. Das gesamte Dokumentvolume einschließlich Eingang, Originalen, Ordnern, Paketständen und Mailteilen (`documents.tar`); die Sicherung arbeitet innerhalb von `/data` und hängt nicht von einem Hostpfad ab.
 3. `.env` mit benötigtem Schlüssel (`environment.env`, private Rechte).
 4. Formatbeschreibung und SHA256-Dateiliste.
 
@@ -99,7 +118,7 @@ Danach startet es App/Worker wieder. Ein währenddessen fehlschlagender Backup-L
 
 ## Gemeinsame Wiederherstellung
 
-**Ersetzt die aktuelle Datenbank und die gesamte aktuelle Dokumentablage.** Zuerst deren zusätzlichen Notfall-Backupstand sichern. Für einen neuen Host den gleichen Code-/Containerstand bereitstellen, `.env` aus sicherer Quelle wiederherstellen und gegebenenfalls Hostpfad/UID/GID/interne Adresse anpassen. `DJANGO_SECRET_KEY` muss zum Backup passen; das Skript prüft dies vor Änderungen.
+**Ersetzt die aktuelle Datenbank und die gesamte aktuelle Dokumentablage.** Zuerst deren zusätzlichen Notfall-Backupstand sichern. Für einen neuen Host den gleichen Code-/Containerstand bereitstellen, `.env` aus sicherer Quelle wiederherstellen und gegebenenfalls Volume-Definition und interne Adresse anpassen. `DJANGO_SECRET_KEY` muss zum Backup passen; das Skript prüft dies vor Änderungen.
 
 ```sh
 sh scripts/restore.sh backups/2026-11-18 --yes-replace
@@ -111,4 +130,4 @@ Laufende Aufträge des alten Prozesses können keinen gültigen Lease behalten. 
 
 ## Einrichtungs-/Live-Abnahme
 
-Noch kundenspezifisch: private Serveradresse/Hostpfad, reale Firmen/Konten/Depots/Kategorien, IMAP-/SMTP-Anbieter/Ordner/Importbeginn/TLS, Absender/Empfänger/Größenlimits, Versandregel bei offenen Punkten, repräsentative anonymisierte Originale und Orca-MCP-Konfiguration/Termin. Keine echten Geheimnisse in Issues oder Git ablegen. Synthetische Tests ersetzen diese Live-Abnahme nicht.
+Noch kundenspezifisch: private Serveradresse und gegebenenfalls späteres Netzwerkvolume, reale Firmen/Konten/Depots/Kategorien, IMAP-/SMTP-Anbieter/Ordner/Importbeginn/TLS, Absender/Empfänger/Größenlimits, Versandregel bei offenen Punkten, repräsentative anonymisierte Originale und Orca-MCP-Konfiguration/Termin. Keine echten Geheimnisse in Issues oder Git ablegen. Synthetische Tests ersetzen diese Live-Abnahme nicht.

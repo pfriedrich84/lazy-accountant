@@ -1,5 +1,7 @@
 import importlib.util
 import io
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -54,3 +56,27 @@ def test_safe_offline_restore_replaces_complete_tree(tmp_path):
     restore.restore_file_tree(archive_bytes("Firma/2026/10/ER/original.pdf"), root)
     assert not (root / "old").exists()
     assert (root / "Firma/2026/10/ER/original.pdf").read_bytes() == b"original"
+
+
+def test_init_env_creates_only_private_config_without_host_storage(tmp_path):
+    repository = Path(__file__).resolve().parents[2]
+    script = tmp_path / "scripts/init-env.py"
+    script.parent.mkdir()
+    script.write_bytes((repository / "scripts/init-env.py").read_bytes())
+    (tmp_path / ".env.example").write_bytes((repository / ".env.example").read_bytes())
+    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, check=True)
+    environment = tmp_path / ".env"
+    contents = environment.read_text()
+    values = dict(line.split("=", 1) for line in contents.splitlines() if line and not line.startswith("#"))
+    secrets = [values[key] for key in ("DJANGO_SECRET_KEY", "POSTGRES_PASSWORD", "ADMIN_PASSWORD")]
+    assert len(set(secrets)) == 3
+    assert all(len(secret) >= 40 and secret not in result.stdout + result.stderr for secret in secrets)
+    assert "replace-with-" not in contents
+    assert environment.stat().st_mode & 0o777 == 0o600
+    assert values["HTTP_BIND"] == "0.0.0.0"
+    assert values["HTTP_PORT"] == "8000"
+    assert not {"DOCUMENTS_ROOT", "APP_UID", "APP_GID"} & values.keys()
+    assert not (tmp_path / "var").exists()
+    repeated = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    assert repeated.returncode != 0
+    assert environment.read_text() == contents
