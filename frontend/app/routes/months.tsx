@@ -87,7 +87,10 @@ export default function Months() {
                         to={`/documents/${d.id}`}
                         style={{ overflowWrap: "anywhere" }}
                       >
-                        {d.original_name}
+                        {d.effective_name}
+                        <Typography variant="caption" sx={{ display: "block" }}>
+                          Original: {d.original_name}
+                        </Typography>
                       </Link>
                       <Status status={d.status} />
                     </Stack>

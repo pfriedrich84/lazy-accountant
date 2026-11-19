@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { ErrorAlert, Heading, Loading, Status } from "../components";
 import { useApp } from "./shell";
+import { DocumentName } from "../document-names";
 
 function Editor({ doc }: { doc: Document }) {
   const { companies, period: activePeriod } = useApp();
@@ -131,7 +132,7 @@ function Editor({ doc }: { doc: Document }) {
   return (
     <>
       <Heading
-        title={doc.original_name}
+        title={doc.effective_name}
         subtitle={`Revision ${doc.version} · Original SHA256 ${doc.sha256.slice(0, 16)}…`}
         actions={
           <Stack
@@ -147,6 +148,7 @@ function Editor({ doc }: { doc: Document }) {
           </Stack>
         }
       />
+      <DocumentName doc={doc} />
       <ErrorAlert error={save.error || assignments.error} />
       {doc.filing_status === "pending" && (
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -452,8 +454,22 @@ function Editor({ doc }: { doc: Document }) {
                         </Stack>
                       </Alert>
                     )}
-                  {field("subtype", "Unterart")}
+                  {field("bank_short_name", "Belegter Bank-Kurzname")}
+                  {kind === "security_pdf" && (
+                    <>
+                      {field("valuation_date", "Bewertungsstichtag", "date")}
+                      {field("isin", "ISIN")}
+                    </>
+                  )}
                 </>
+              )}
+              {field(
+                "subtype",
+                "Unterart (z. B. Zahlungsbeleg oder Depotaufstellung)",
+              )}
+              {field(
+                "confirmed_partner_name",
+                "Bestätigte Geschäftspartnerbezeichnung (optional)",
               )}
               <Stack
                 direction={{ xs: "column", sm: "row" }}

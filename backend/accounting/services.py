@@ -12,7 +12,7 @@ from PIL import Image, ImageOps
 from pydantic import ValidationError
 from pypdf import PdfReader
 
-from . import storage
+from . import naming, storage
 from .auth import DomainError
 from .camt import parse_camt
 from .models import (
@@ -148,7 +148,7 @@ def get_document(actor, document_id, permission="read", lock=False):
     return d
 
 
-def document_data(d, detailed=False):
+def document_data(d, detailed=False, names=None):
     desired = storage.desired_path(d)
     pending = d.filed_path != desired
     filing_error = ""
@@ -164,6 +164,7 @@ def document_data(d, detailed=False):
         "id": str(d.id),
         "company_id": d.company_id,
         "original_name": d.original_name,
+        **naming.data(d, names),
         "sha256": d.sha256,
         "size": d.size,
         "media_type": d.media_type,
@@ -237,7 +238,11 @@ def list_documents(
     if category_id:
         qs = qs.filter(category_id=category_id)
     if search:
-        qs = qs.filter(Q(original_name__icontains=search) | Q(metadata__icontains=search))
+        qs = qs.filter(
+            Q(original_name__icontains=search)
+            | Q(handover_name__icontains=search)
+            | Q(metadata__icontains=search)
+        )
     # UUID cursor is stable while status changes during processing; never use offsets for a mutable open list.
     qs = qs.order_by("id")
     total = qs.count()
@@ -248,8 +253,9 @@ def list_documents(
             raise DomainError("Ungültiger Cursor.") from None
     limit = max(1, min(int(limit), 100))
     rows = list(qs.select_related("company", "account", "category").prefetch_related("related")[: limit + 1])
+    names = naming.resolve(naming.context_many(rows[:limit]))
     return {
-        "results": [document_data(d) for d in rows[:limit]],
+        "results": [document_data(d, names=names) for d in rows[:limit]],
         "total": total,
         "next_cursor": str(rows[limit - 1].id) if len(rows) > limit else None,
     }
@@ -341,6 +347,8 @@ def ingest(actor, name, data, company_id=None, idempotency_key=None, provenance=
                 except Exception:
                     doc.parser_error = "Datei konnte nicht gelesen werden; Original erhalten"
             doc.issues = validation_issues(doc.kind, company_id, "", None, {}, doc.parser_error)
+            doc.handover_name = naming.fallback(doc)
+            doc.name_source = "fallback"
             doc.save()
             Revision.objects.create(
                 document=doc,
@@ -443,6 +451,10 @@ def save_result(actor, payload, source="manual"):
         doc.status = "ready" if result.approve else "review"
         doc.version += 1
         doc.duplicate_of = duplicate
+        if doc.name_source != "manual":
+            proposed = naming.proposal(doc)
+            doc.handover_name = proposed["name"]
+            doc.name_source = proposed["source"]
         doc.save()
         doc.related.set(related)
         Revision.objects.create(
