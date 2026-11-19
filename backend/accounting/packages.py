@@ -205,6 +205,8 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
             and doc.period in periods
             and not doc.duplicate_of_id
             and not doc.is_excluded
+            and doc.security_status == "clean"
+            and doc.scanned_sha256 == doc.sha256
         ):
             payment = {**status_for_document(doc), "period": doc.period}
             payment["snapshot_revision"] = digest({k: v for k, v in payment.items() if k != "as_of"})

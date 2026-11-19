@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import OuterRef, Prefetch, Q, Subquery, Sum
+from django.db.models import F, OuterRef, Prefetch, Q, Subquery, Sum
 from django.utils import timezone
 from iso4217 import Currency
 
@@ -56,7 +56,18 @@ def money(value, currency):
         raise DomainError("Positiver Betrag in gültiger Rechnungswährung erforderlich.") from None
 
 
+def _require_clean_document(doc):
+    if doc.security_status != "clean" or doc.scanned_sha256 != doc.sha256:
+        raise DomainError("Finanzquelle sicherheitsgesperrt. Dokumentprüfung erforderlich.", 423)
+
+
+def _require_clean_sources(tx):
+    for source in tx.sources.all():
+        _require_clean_document(source.document)
+
+
 def _invoice(doc):
+    _require_clean_document(doc)
     if doc.kind not in INVOICE_KINDS or not doc.company_id or doc.duplicate_of_id or doc.is_excluded:
         raise DomainError("Aktive Ein- oder Ausgangsrechnung erforderlich.")
     currency = doc.metadata.get("currency")
@@ -74,14 +85,21 @@ def payment_status(actor, document_id, as_of=None):
 
 
 def status_for_document(doc, as_of=None):
+    _require_clean_document(doc)
     day = date.fromisoformat(as_of) if as_of else timezone.localdate()
     rows = getattr(doc, "_payment_history", None)
     if rows is None:
         rows = list(
             doc.payment_allocations.select_related("transaction", "reversed_by_bank_transaction")
-            .prefetch_related("reversed_by_bank_transaction__sources")
+            .prefetch_related(
+                "reversed_by_bank_transaction__sources__document", "transaction__sources__document"
+            )
             .order_by("created_at", "id")
         )
+    for allocation in rows:
+        _require_clean_sources(allocation.transaction)
+        if allocation.reversed_by_bank_transaction_id:
+            _require_clean_sources(allocation.reversed_by_bank_transaction)
     history = [
         {
             "id": str(a.id),
@@ -150,6 +168,7 @@ def status_for_document(doc, as_of=None):
 
 
 def transaction_data(tx):
+    _require_clean_sources(tx)
     used = getattr(tx, "_active_amount", None)
     if used is None:
         used = _allocated(tx.allocations)
@@ -255,7 +274,7 @@ def list_transactions(
                 BankTransaction.objects.filter(reversal_of=OuterRef("pk")).values("id")[:1]
             ),
         )
-        .prefetch_related("sources")
+        .prefetch_related("sources__document")
         .order_by("id")
     )
 
@@ -302,7 +321,12 @@ def list_invoice_statuses(
     except ValueError, TypeError:
         raise DomainError("Ungültiger Stichtag (YYYY-MM-DD erforderlich).") from None
     qs = Document.objects.filter(
-        company_id=company_id, kind__in=INVOICE_KINDS, duplicate_of__isnull=True, is_excluded=False
+        company_id=company_id,
+        kind__in=INVOICE_KINDS,
+        duplicate_of__isnull=True,
+        is_excluded=False,
+        security_status="clean",
+        scanned_sha256=F("sha256"),
     )
     if kind:
         qs = qs.filter(kind=kind)
@@ -315,7 +339,7 @@ def list_invoice_statuses(
         )
     history = (
         PaymentAllocation.objects.select_related("transaction", "reversed_by_bank_transaction")
-        .prefetch_related("reversed_by_bank_transaction__sources")
+        .prefetch_related("reversed_by_bank_transaction__sources__document", "transaction__sources__document")
         .order_by("created_at", "id")
     )
     qs = qs.prefetch_related(
@@ -442,8 +466,13 @@ def _apply_bank_reversals(actor, company_id):
     never establish a reversal relationship. Resolve before matching new payments.
     """
     transactions = list(
-        BankTransaction.objects.select_for_update().filter(company_id=company_id).order_by("id")
+        BankTransaction.objects.select_for_update()
+        .filter(company_id=company_id)
+        .prefetch_related("sources__document")
+        .order_by("id")
     )
+    for movement in transactions:
+        _require_clean_sources(movement)
     originals = [t for t in transactions if not t.reversal]
     reviews = {t.id: [] for t in transactions}
     applied = []
@@ -545,11 +574,17 @@ def _apply_bank_reversals(actor, company_id):
 
 
 def _candidate_rows(tx):
+    _require_clean_sources(tx)
     if tx.sources.filter(document__is_excluded=True).exists():
         return []
     kind = "outgoing_invoice" if tx.direction == "CRDT" else "incoming_invoice"
     docs = Document.objects.filter(
-        company_id=tx.company_id, kind=kind, duplicate_of__isnull=True, is_excluded=False
+        company_id=tx.company_id,
+        kind=kind,
+        duplicate_of__isnull=True,
+        is_excluded=False,
+        security_status="clean",
+        scanned_sha256=F("sha256"),
     )
     results = []
     for doc in docs.order_by("id"):
@@ -637,6 +672,8 @@ def candidates(actor, transaction_id):
 
 
 def _allocate(actor, tx, doc, amount, decision, reason):
+    _require_clean_document(doc)
+    _require_clean_sources(tx)
     if doc.is_excluded or tx.sources.filter(document__is_excluded=True).exists():
         raise DomainError("Ausgeschlossene Rechnung/Bankquelle kann keine neue Zahlung belegen.", 409)
     gross, currency = _invoice(doc)
