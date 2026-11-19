@@ -8,6 +8,7 @@ fi
 case "${1:-web}" in
   web)
     python backend/manage.py migrate --noinput
+    python backend/manage.py prepare_security
     if [ "${BOOTSTRAP_DEMO:-0}" = "1" ]; then
       python backend/manage.py bootstrap --demo
     else

@@ -66,7 +66,7 @@ def test_roundtrip_without_fabricated_assignment_and_no_cascade(actor, companies
     assert restored["filed_path"] == d["filed_path"]
     doc = Document.objects.get(id=d["id"])
     assert storage.read_original(doc) == image
-    assert list(doc.revisions.values_list("source", "reason")) == [
+    assert list(doc.revisions.order_by("version").values_list("source", "reason")) == [
         ("upload", ""),
         ("exclude", "Signaturgrafik, kein Beleg"),
         ("restore", "Doch ein Beleg"),

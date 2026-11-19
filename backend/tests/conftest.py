@@ -13,6 +13,30 @@ def data_root(settings, tmp_path):
     settings.MAILERS = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 
 
+@pytest.fixture(autouse=True)
+def clean_scanner(request, monkeypatch):
+    """Business regression tests use successful scans, never a production bypass.
+
+    Security tests opt out and exercise the actual deferred state machine.
+    """
+    if request.node.get_closest_marker("security") or request.node.get_closest_marker("clamav"):
+        return
+    from django.db import transaction
+    from accounting import scanner, security
+
+    original = transaction.on_commit
+
+    def commit(callback, using=None, robust=False):
+        if callback.__module__ in {"accounting.services", "accounting.security"}:
+            callback()
+        else:
+            original(callback, using=using, robust=robust)
+
+    monkeypatch.setattr(transaction, "on_commit", commit)
+    monkeypatch.setattr(security, "publish", security.run_scan)
+    monkeypatch.setattr(scanner, "scan", lambda data: scanner.Verdict("clean", "test-engine/1"))
+
+
 @pytest.fixture
 def user(db):
     return get_user_model().objects.create_user("test", password="test-password-12345")

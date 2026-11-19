@@ -163,13 +163,15 @@ def test_camt_errors_preserve_original(actor, companies):
     unsupported = good.replace(b"camt.053.001.08", b"camt.053.001.99")
     r = services.ingest(actor, "unsupported.xml", unsupported, companies[0].id)["document"]
     doc = Document.objects.get(id=r["id"])
-    assert "Nicht unterstützter" in doc.parser_error
-    assert storage.read_original(doc) == unsupported
+    assert doc.security_status == "error"
+    assert storage.path(doc.quarantine_path).read_bytes() == unsupported
+    with pytest.raises(DomainError):
+        storage.read_original(doc)
     malicious = (
         b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><Document>&e;</Document>'
     )
     r = services.ingest(actor, "evil.xml", malicious, companies[0].id)["document"]
-    assert Document.objects.get(id=r["id"]).parser_error
+    assert Document.objects.get(id=r["id"]).security_status == "error"
 
 
 def test_upload_transfer_and_idempotency(actor, companies, client):

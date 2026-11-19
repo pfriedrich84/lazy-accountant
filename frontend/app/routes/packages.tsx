@@ -146,6 +146,17 @@ export default function Packages() {
           resume.error
         }
       />
+      {!!selected.data?.security_blocked?.length && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Dieses Paket ist für Download und Versand gesperrt. Die Snapshot-Bytes
+          bleiben unverändert.
+          {selected.data.security_blocked.map((item) => (
+            <Box key={item.document_id}>
+              Dokument {item.document_id}: {item.reason}
+            </Box>
+          ))}
+        </Alert>
+      )}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack
           direction={{ xs: "column", md: "row" }}
@@ -339,6 +350,18 @@ export default function Packages() {
                     {e.document.original_name}
                   </Link>
                   : {e.reason}
+                </Box>
+              ))}
+            </Alert>
+          )}
+          {!!shown.blocked_imports?.length && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <strong>
+                Sicherheitsgesperrte IMAP-Importfälle (nicht enthalten):
+              </strong>
+              {shown.blocked_imports.map((item) => (
+                <Box key={item.id}>
+                  Import {item.id}: {item.security_status} – {item.error}
                 </Box>
               ))}
             </Alert>

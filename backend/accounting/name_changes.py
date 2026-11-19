@@ -8,6 +8,7 @@ from django.db import transaction
 from . import naming, services, storage
 from .auth import DomainError
 from .models import Company, Revision
+from .security import require_clean
 
 
 def validate_ids(document_ids):
@@ -24,6 +25,8 @@ def validate_ids(document_ids):
 def preview(actor, document_ids):
     validate_ids(document_ids)
     docs = [services.get_document(actor, identifier) for identifier in document_ids]
+    for doc in docs:
+        require_clean(doc)
     peers = naming.context_many(docs)
     proposed = naming.resolve(peers, [str(d.id) for d in docs])
     old = naming.resolve(peers)
@@ -64,6 +67,7 @@ def change(actor, entries, *, manual=False):
         }
         for entry, initial_doc in zip(entries, initial, strict=True):
             doc = docs[str(initial_doc.id)]
+            require_clean(doc)
             if type(entry.get("base_version")) is not int or entry["base_version"] != doc.version:
                 raise DomainError(
                     "Dokument wurde inzwischen geändert. Vorschau neu laden.",

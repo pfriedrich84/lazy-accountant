@@ -12,7 +12,7 @@ from rest_framework.views import APIView, exception_handler as drf_exception_han
 
 from . import jobs, mail, name_changes, naming, packages, services, storage, transfers
 from .auth import DomainError, issue_token, request_actor
-from .models import AccessToken, Account, Category, Dispatch, ImportSource, Job, Package
+from .models import AccessToken, Account, Category, Dispatch, Job, Package
 from .schemas import DocumentResult
 
 
@@ -264,6 +264,13 @@ class DocumentNames(APIView):
 
 
 class DocumentFile(APIView):
+    def post(self, request, document_id, representation):
+        if representation != "scan":
+            raise DomainError("Aktion nicht gefunden.", 404)
+        from .security import request_scan
+
+        return Response(request_scan(request_actor(request), document_id), status=202)
+
     def get(self, request, document_id, representation):
         actor = request_actor(request)
         doc = services.get_document(actor, document_id)
@@ -409,14 +416,7 @@ class ImportErrors(APIView):
     def get(self, request, company_id):
         actor = request_actor(request)
         actor.require(company_id)
-        return Response(
-            list(
-                ImportSource.objects.filter(mailbox__company_id=company_id)
-                .exclude(error="")
-                .order_by("-id")
-                .values("id", "provenance", "error")[:200]
-            )
-        )
+        return Response(mail.import_errors(actor, company_id))
 
 
 class Tokens(APIView):

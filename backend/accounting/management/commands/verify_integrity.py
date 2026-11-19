@@ -23,6 +23,11 @@ class Command(BaseCommand):
         errors = []
         for doc in Document.objects.select_related("company").iterator():
             try:
+                if doc.security_status != "clean":
+                    quarantine = storage.path(doc.quarantine_path or doc.original_path).read_bytes()
+                    if storage.checksum(quarantine) != doc.sha256:
+                        raise ValueError("Quarantäne-Prüfsumme falsch")
+                    continue
                 original = storage.read_original(doc)
                 if doc.filed_path != storage.desired_path(doc):
                     raise ValueError("Physische Zuordnung noch nicht aktuell")
@@ -65,7 +70,7 @@ class Command(BaseCommand):
                         raise ValueError("Prüfsumme falsch")
                 except Exception as e:
                     errors.append(f"Fehleranhang {source.id}: {e}")
-        if FileOperation.objects.filter(status="pending").exists():
+        if FileOperation.objects.filter(status="pending", document__security_status="clean").exists():
             errors.append("Es gibt ausstehende Dateioperationen.")
         if errors:
             raise CommandError("Integritätsprüfung fehlgeschlagen:\n" + "\n".join(errors))

@@ -156,6 +156,14 @@ def seed_month(user, company, period="2026-10", classified=False, output=None):
         result = ingest(actor, name, data, company.id, f"demo:{company.id}:{period}:{name}")
         doc = result["document"]
         if classified and doc["version"] == 1:
+            # Synthetic fixtures use the real security service too; no seed bypass.
+            if doc["security_status"] == "pending":
+                from .security import run_scan
+                from .models import Document
+                from .services import document_data
+
+                run_scan(doc["id"])
+                doc = document_data(Document.objects.get(id=doc["id"]))
             account_id = None
             if kind in {"bank_pdf", "bank_camt", "security_pdf"}:
                 account_id = Account.objects.get(
