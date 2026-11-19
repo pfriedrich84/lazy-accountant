@@ -84,6 +84,24 @@ def test_sums_and_optimistic_concurrency(actor, companies):
         Metadata(net="NaN")
 
 
+@pytest.mark.parametrize("currency,rate", [("EUR", "20"), ("USD", None)])
+def test_zero_invoice_is_valid_without_inventing_a_tax_rate(actor, companies, currency, rate):
+    original = sample_pdf(["Invoice: net 0.00, total 0.00"])
+    doc = services.ingest(actor, "zero-invoice.pdf", original, companies[0].id)["document"]
+    payload = result(doc, companies[0].id, approve=True)
+    taxes = [{"rate": rate, "net": "0.00", "tax": "0.00"}] if rate is not None else []
+    payload["metadata"].update(
+        currency=currency, net="0.00", tax="0.00", gross="0.00", taxes=taxes, subtype="zero_invoice"
+    )
+    saved = services.save_result(actor, payload)
+    assert saved["status"] == "ready" and saved["issues"] == []
+    assert saved["filing_status"] == "done"
+    assert saved["metadata"]["currency"] == currency
+    assert all(saved["metadata"][key] == "0.00" for key in ("net", "tax", "gross"))
+    assert saved["metadata"]["taxes"] == taxes
+    assert storage.read_original(Document.objects.get(id=saved["id"])) == original
+
+
 def test_authorization_including_files(client, actor, companies):
     d = services.ingest(actor, "a.pdf", sample_pdf(["private"]), companies[0].id)["document"]
     outsider = get_user_model().objects.create_user("outsider")
