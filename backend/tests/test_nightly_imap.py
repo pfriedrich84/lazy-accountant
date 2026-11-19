@@ -198,3 +198,37 @@ def test_nightly_snapshot_excludes_later_mail_and_rejects_uidvalidity_changes(
     mailbox.refresh_from_db()
     assert mailbox.last_uid == (20 if validity == "200" else 25)
     client.logout.assert_called_once()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_explicit_ui_import_and_resume_ignore_automation_checkbox(client, companies, enabled):
+    mailbox = Mailbox.objects.create(company=companies[0], enabled=enabled)
+    response = client.post(
+        "/api/jobs/",
+        {"company_id": companies[0].id, "kind": "imap", "idempotency_key": "explicit-ui-import"},
+        format="json",
+    )
+    assert response.status_code == 202
+    job = Job.objects.get(id=response.json()["id"])
+    assert job.payload == {}  # manual trigger, never a nightly automatic job
+    with patch("accounting.mail.scan_mailbox", return_value={"messages": 0, "remaining": 0}) as scan:
+        assert jobs.run_job(job.id)["status"] == "done"
+        Job.objects.filter(id=job.id).update(status="failed")
+        response = client.post(f"/api/jobs/{job.id}/resume/", {}, format="json")
+        assert response.status_code == 200 and response.json()["status"] == "queued"
+        assert jobs.run_job(job.id)["status"] == "done"
+    assert scan.call_count == 2
+    mailbox.refresh_from_db()
+    assert mailbox.enabled == enabled
+
+
+def test_rest_package_resume_is_still_allowed(client, actor, companies):
+    job = Job.objects.create(
+        company=companies[0],
+        actor_id=actor.user_id,
+        kind="package",
+        status="failed",
+        idempotency_key="failed-package",
+    )
+    response = client.post(f"/api/jobs/{job.id}/resume/", {}, format="json")
+    assert response.status_code == 200 and response.json()["status"] == "queued"
