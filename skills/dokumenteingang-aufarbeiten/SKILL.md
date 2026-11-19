@@ -1,11 +1,11 @@
 ---
 name: dokumenteingang-aufarbeiten
-description: Offene Rechnungen und Belege über den Lazy-Accountant-MCP lesen, versioniert auswerten, prüfen und in die echte Monatsablage einordnen.
+description: Offene Rechnungen und Belege über MCP auswerten, versioniert ablegen, passende vorhandene Kategorien nutzen und neue Kategorien beleggestützt vorschlagen.
 ---
 
 # Dokumenteingang aufarbeiten
 
-Version 1.2. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP `/mcp/` mit Bearer-Token. Die ausführbaren Schritte sind die unten benannten MCP-Aufrufe, kein plattformspezifisches Skript. Nur vorhandene Tools verwenden. Für Bank-/Depotunterlagen zusätzlich `konto-und-depotunterlagen-sortieren` anwenden.
+Version 1.3. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP `/mcp/` mit Bearer-Token. Die ausführbaren Schritte sind die unten benannten MCP-Aufrufe, kein plattformspezifisches Skript. Nur vorhandene Tools verwenden. Für Bank-/Depotunterlagen zusätzlich `konto-und-depotunterlagen-sortieren` anwenden.
 
 ## Sicherheits- und Datenvertrag
 
@@ -33,6 +33,32 @@ Version 1.2. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP 
 7. `save_document_result(result=…, run_id=…)` aufrufen. `result` muss `document_id`, `base_version`, die vollständige gewünschte Zuordnung und Metadaten enthalten. `related_ids` bewahrt die bestehenden ausgehenden Verweise dieses Dokuments; eingehende `referenced_by_ids` sind nur lesbar und werden am jeweiligen Quelldokument mit dessen Ausgangsversion geändert. `approve: true` nur bei vollständigen und plausiblen Ergebnissen ohne offene Punkte; sonst `false`. Der Server prüft Pflichtfelder und Rechenbeziehungen unabhängig von Modellvertrauen.
 8. Bei Versionskonflikt (`409`/Toolfehler) `get_document` neu lesen, neuere manuelle Korrekturen **nicht** durch das alte Ergebnis überschreiben. Abweichung melden oder die tatsächlich neue Ausgangslage erneut prüfen. Kein blinder Retry mit erhöhter Versionsnummer.
 9. Resultat auf `issues`, `status`, `version`, `filing_status` und `filed_path` prüfen. `filing_status=pending`/`filing_error` als ausstehende journalisierte Dateiablage melden, nicht als erfolgreich abgelegt behaupten und nicht durch erneutes blindes Metadatenschreiben beheben. Fehlerhafte Auslese verliert kein Original. Bei erneuten Durchläufen keine erneuten Uploads/Pakete erzeugen; bereits unverändert bearbeitete Fälle überspringen.
+
+## Kategorien aus den tatsächlichen Belegen vorschlagen
+
+- `list_assignments(company_id)` liefert die vorhandenen Kategorien mit IDs. Vorhandene, inhaltlich passende Kategorien bevorzugen; ähnliche Namen und Synonyme prüfen, keine Dubletten oder eigene Kategorie je Lieferant/Monat/Steuersatz erzeugen. Kategorien sind wirtschaftliche Themen, keine Buchhaltungskonten und keine steuerliche Beurteilung.
+- Bei normaler Belegaufarbeitung eine **eindeutig passende vorhandene Kategorie** mit ihrer echten `category_id` verwenden und anhand des Leistungsinhalts begründen. Nicht allein nach Aussteller, Betrag oder Dokumentart raten. Bereits gesetzte Kategorien insbesondere aus manuellen Revisionen erhalten; nur bei ausdrücklichem Änderungsauftrag ersetzen. Pro Dokument ist nur eine Kategorie möglich. Bei gemischten/unklaren Inhalten keine willkürliche Kategorie erzwingen.
+- Gibt es keine sinnvoll passende Kategorie, firmenbezogene neue Namen aus tatsächlich gelesenen Belegen vorschlagen, beispielsweise „Software & Abos“ oder „Rechtsberatung“. Je Vorschlag eine kurze Begründung und konkrete berechtigte Dokument-IDs als Beispiele nennen. Vorschläge je Firma bündeln und ähnliche Namen über den gesamten Lauf zusammenführen. Keine firmaübergreifenden Dokument-IDs/Zuordnungen mischen; bei ungeklärter Firma zunächst keine Kategorie vorschlagen.
+- **Neue Kategorien nur vorschlagen, nicht ungefragt anlegen.** Keine IDs erfinden und keine Admin-/REST-Umwege benutzen. Ein Vorschlag ist noch keine Kategorie: `category_id` bleibt ohne passende vorhandene Kategorie `null`. Fehlende/noch nicht bestätigte Kategorie allein ist kein Freigabefehler: keinen `open_points`-Eintrag oder unsichere Feldevidenz allein deshalb erzeugen. Andere fachliche Unsicherheiten bleiben unverändert offen.
+- **Reiner Vorschlagsauftrag:** Bei bereits aufgearbeiteten Belegen darf lesend auch `status=null` vollständig paginiert ausgewertet werden, begrenzt auf beauftragte Firma/Zeiträume. Keine Claims, Dokumentrevisionen, Neuimporte oder Paketversionen nur für Vorschläge erzeugen; bestehende Kategorien und Freigaben unangetastet lassen. Es werden nur tatsächliche Lese-/Verarbeitungsrechte genutzt, keine zusätzlichen Adminrechte benötigt.
+- Vorschläge im menschlich lesbaren Abschluss nennen und über `report_agent_run(job_id, result=…, status=…)` zusätzlich als `result.category_suggestions` speichern. Ein bestehender Monatslauf liefert die Job-ID; bei eigenständigem Auftrag einen `start_agent_run(company_id, period, idempotency_key)` mit vertrauenswürdigem Berichtsmonat und stabilem Auftragskey verwenden. Ein technischer Berichtsmonat ist keine neue Belegmonatszuordnung. Mit `get_job(job_id)` bisherige Zwischenberichte lesen und bei Wiederaufnahme Vorschläge nach Firma/normalisiertem Namen zusammenführen, Dokument-IDs deduplizieren, nicht die anderen Ergebnisfelder verlieren. Abgeschlossene Läufe nicht überschreiben; für neue Vorschläge einen neuen Auftrag verwenden.
+- `category_suggestions` gehört in den **Agentenbericht**, nicht als erfundenes Feld in `DocumentResult`/`Metadata`. Für neue Kategorien ist `existing_category_id: null`; verweist ein Vorschlag auf eine vorhandene Kategorie, müssen ID und Name exakt aus den Firmenzuordnungen stammen. Reine Vorschläge weisen noch nichts zu und legen nichts an.
+
+Beispiel eines **synthetischen Agentenberichts** (bestehende Dokument-/Paket-/Versand-Ergebnisse daneben erhalten):
+
+```json
+{
+  "category_suggestions": [
+    {
+      "company_id": 1,
+      "name": "Software & Abos",
+      "existing_category_id": null,
+      "reason": "Wiederkehrende Software-Nutzungsleistungen in den gelesenen Belegen; keine passende bestehende Kategorie.",
+      "document_ids": ["<berechtigte-Dokument-ID-1>", "<berechtigte-Dokument-ID-2>"]
+    }
+  ]
+}
+```
 
 ## Beispiel-Ergebnis
 
@@ -66,4 +92,4 @@ Version 1.2. Zielsystem: Lazy Accountant, offizielles MCP über Streamable HTTP 
 
 ## Abschlussbericht
 
-Firma/Zeitraum und `run_id`, alle bearbeiteten Dokument-IDs mit neuer Revision/Status, übersprungene Fälle, Dubletten und offene Fälle samt Grund/Belegstelle berichten. Keine sensiblen Originalinhalte oder Token unnötig protokollieren. Es gibt keinen serverseitigen LLM-Schlüssel und keine eigene automatische Monatsplanung.
+Firma/Zeitraum und `run_id`, alle bearbeiteten Dokument-IDs mit neuer Revision/Status, übersprungene Fälle, Dubletten, Kategoriezuordnungen und neue Kategorienvorschläge sowie offene Fälle samt Grund/Belegstelle berichten. Keine sensiblen Originalinhalte oder Token unnötig protokollieren. Es gibt keinen serverseitigen LLM-Schlüssel und keine eigene automatische Monatsplanung.

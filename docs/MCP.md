@@ -59,6 +59,14 @@ Vollständiges Eingabeschema: `DocumentResult` in `backend/accounting/schemas.py
 
 REST und MCP schreiben dieselben Revisionen mit Benutzer, Quelle (`manual` / `agent:<run_id>`), Zeitpunkt, Ausgangs- und Ergebnisversion.
 
+## Kategorienvorschläge über den Agenten
+
+Der Belegskill (1.3), Bank-/Depotskill (1.3) und Monatsskill (1.1) berücksichtigen Kategorien im regulären Lauf. `list_assignments` liefert die vorhandenen IDs/Namen pro Firma. Eindeutig passende bestehende Kategorien können bei normaler Aufarbeitung verwendet werden; vorhandene manuelle Zuordnungen bleiben erhalten. Neue Kategorien werden **nur vorgeschlagen**, nicht ungefragt angelegt. Keine erfundenen IDs, keine Kategorie je Lieferant/Monat und keine automatische steuerliche Kontierung. Ein Kontoauszug mit gemischten Bewegungen ist nicht insgesamt „Bankspesen“.
+
+Vorschläge werden mit Name, Begründung und berechtigten Beispieldokument-IDs pro Firma gebündelt. Der bestehende MCP-Weg reicht dafür aus: `start_agent_run` → `report_agent_run(result={"category_suggestions": [...]}, status=...)` → `get_job`. Ein Vorschlag enthält `company_id`, `name`, `existing_category_id` (bei neuen Namen `null`), `reason` und `document_ids`. Es handelt sich um eine **Konvention im Agentenbericht**, nicht um neue Felder in `DocumentResult` oder einen eingebauten LLM-/Vorschlagsdienst. Lesen erfordert `read`, Berichte speichern `process`; zum Vorschlagen sind keine Adminrechte nötig. Der aktuelle MCP stellt kein Werkzeug zum Anlegen neuer Kategorien bereit.
+
+Bei Wiederaufnahme laufende Zwischenberichte lesen und nach Firma/normalisiertem Namen zusammenführen; andere Ergebnisfelder bewahren. Fertige Berichte nicht überschreiben. Ein reiner Vorschlagsauftrag analysiert auch bereits freigegebene Belege innerhalb des beauftragten Firmen-/Zeitraumumfangs, ändert aber weder Dokumentrevisionen/Kategorien noch Paketstände. Eine nicht bestätigte bzw. fehlende Kategorie ist allein kein Freigabeblocker.
+
 ## Aufträge, Idempotenz und Versand
 
 Externe Auftrags-ID als stabilen `idempotency_key` verwenden, beispielsweise `orca:<job>:imap`, `orca:<job>:paket`, `orca:<job>:versand`. Derselbe Schlüssel bei anderen Parametern erzeugt einen Konflikt. Job-/Paket-/Dispatch-IDs im Agentenbericht speichern und nach Unterbrechung weiterverwenden.
