@@ -479,11 +479,13 @@ function MailEditor({
                   }
                 />
               }
-              label="Regelmäßigen IMAP-Abruf aktivieren"
+              label="Nächtlichen IMAP-Abruf aktivieren"
             />
             <Alert severity="info">
-              Dediziertes Belegpostfach oder gezielter Ordner empfohlen.
-              Nachrichten werden nicht gelöscht. Ohne Aliasregel ist das
+              Automatischer Abruf einmal pro Nacht ab 03:00 Uhr (Europe/Vienna).
+              Größere Eingänge werden in Teilabrufen abgearbeitet. Manueller
+              Abruf bleibt jederzeit möglich. Dediziertes Belegpostfach oder
+              gezielter Ordner empfohlen. Nachrichten werden nicht gelöscht. Ohne Aliasregel ist das
               Postfach eindeutig dieser Firma zugeordnet.
             </Alert>
             <Typography variant="caption">

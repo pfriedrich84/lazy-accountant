@@ -249,6 +249,11 @@ def scan_mailbox(job, connector=None):
         validity = validity_data[0].decode() if validity_data and validity_data[0] else ""
         if not validity:
             raise DomainError("IMAP liefert keine UIDVALIDITY; sicherer Import nicht möglich.")
+        expected_validity = job.payload.get("snapshot_uidvalidity")
+        if expected_validity and validity != expected_validity:
+            raise DomainError(
+                "UIDVALIDITY hat sich seit Beginn des Nachtimports geändert; neuen Abruf starten."
+            )
         with transaction.atomic():
             mailbox = Mailbox.objects.select_for_update().get(id=mailbox.id)
             if mailbox.uidvalidity != validity:
@@ -260,6 +265,10 @@ def scan_mailbox(job, connector=None):
         if status != "OK":
             raise DomainError("IMAP-Suche fehlgeschlagen.")
         uids = sorted(int(x) for x in (found[0] or b"").split() if int(x) > mailbox.last_uid)
+        upper_uid = job.payload.get("until_uid")
+        if upper_uid is not None:
+            uids = [uid for uid in uids if uid <= upper_uid]
+        snapshot_uid = upper_uid if upper_uid is not None else max(uids, default=mailbox.last_uid)
         for uid in uids[:20]:
             if time.monotonic() - started > 180:
                 break
@@ -308,6 +317,7 @@ def scan_mailbox(job, connector=None):
             "remaining": max(0, len(uids) - processed),
             "last_uid": mailbox.last_uid,
             "uidvalidity": validity,
+            "snapshot_uid": snapshot_uid,
         }
     finally:
         try:
