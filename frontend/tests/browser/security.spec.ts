@@ -14,11 +14,21 @@ test("harmless EICAR remains quarantined without preview or original access", as
   await expect(
     page.getByRole("heading", { name: "Bereit für den Monatsabschluss?" }),
   ).toBeVisible();
-  await page.goto("/documents");
-  await page.getByLabel("Eingang", { exact: true }).click();
+  // Keep the intentionally unresolved malware case out of the shared personal
+  // inbox: later independent SMTP smokes must still obey the open-issues rule.
+  const company = `Quarantäne Browser ${Date.now()}`;
+  await page.goto("/settings");
   await page
-    .getByRole("option", { name: "Firma ungeklärt", exact: true })
+    .getByRole("button", { name: "+ Firma anlegen", exact: true })
     .click();
+  await page.getByLabel("Firmenname", { exact: true }).fill(company);
+  await page
+    .getByRole("button", { name: "Firma speichern", exact: true })
+    .click();
+  await expect(page.getByLabel("Anzeigename")).toHaveValue(company);
+  await page.goto("/documents");
+  await page.getByRole("banner").getByLabel("Firma", { exact: true }).click();
+  await page.getByRole("option", { name: company, exact: true }).click();
   const eicar =
     "X5O!P%@AP[4\\PZX54(P^)7CC)7}$" +
     "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
