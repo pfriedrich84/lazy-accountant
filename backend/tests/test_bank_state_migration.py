@@ -5,7 +5,12 @@ from django.db.migrations.executor import MigrationExecutor
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
-    "leaf", ["0009_merge_document_security", "0009_merge_0007_document_security_0008_merge_20261119_2155"]
+    "leaf",
+    [
+        "0009_merge_document_security",
+        "0009_merge_0007_document_security_0008_merge_20261119_2155",
+        "0011_bankautomationpolicy_bankcontrolevent_and_more",
+    ],
 )
 def test_control_upgrade_preserves_either_existing_merge_path(leaf):
     executor = MigrationExecutor(connection)
@@ -44,7 +49,9 @@ def test_control_upgrade_preserves_either_existing_merge_path(leaf):
         executor = MigrationExecutor(connection)
         executor.migrate(latest)
         apps = executor.loader.project_state(latest).apps
-        assert apps.get_model("accounting", "BankTransaction").objects.get(id=tx.id).amount == tx.amount
+        migrated = apps.get_model("accounting", "BankTransaction").objects.get(id=tx.id)
+        assert migrated.amount == tx.amount
+        assert migrated.merged_into_id is None and migrated.identity_review_points == []
         assert apps.get_model("accounting", "IdempotencyRecord").objects.get(key="old").result == {
             "transaction_ids": [str(tx.id)]
         }
@@ -54,6 +61,7 @@ def test_control_upgrade_preserves_either_existing_merge_path(leaf):
             "BankCoverageSource",
             "BankControlEvent",
             "PaymentAllocation",
+            "BankIdentityResolution",
         ]:
             assert apps.get_model("accounting", model).objects.count() == 0
     finally:

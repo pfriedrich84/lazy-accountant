@@ -21,6 +21,7 @@ import {
 } from "../payments";
 import { useApp } from "./shell";
 import { BankControls } from "../bank-controls";
+import { BankIdentityPanel } from "../bank-identity";
 
 type InvoiceStatus = PaymentStatus & {
   kind: string;
@@ -147,6 +148,9 @@ function PaymentLists({ companyId }: { companyId: number | null }) {
                 <MenuItem key="reversed" value="reversed">
                   Durch Bank rückgebucht
                 </MenuItem>,
+                <MenuItem key="merged" value="merged">
+                  Zusammengeführte Beobachtungen
+                </MenuItem>,
               ]}
         </TextField>
         {mode === "invoices" && (
@@ -253,7 +257,10 @@ function PaymentLists({ companyId }: { companyId: number | null }) {
                   Originalauszug · {s.locator}
                 </Link>
               ))}
-              <BankCandidates movement={t} />
+              {companyId && (
+                <BankIdentityPanel movement={t} companyId={companyId} />
+              )}
+              {!t.merged_into_id && <BankCandidates movement={t} />}
             </Stack>
           </Paper>
         ))}

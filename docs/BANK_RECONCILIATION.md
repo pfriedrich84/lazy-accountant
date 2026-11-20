@@ -39,7 +39,7 @@ Dies ist ein erster, separat prüfbarer Implementierungsstand, **keine vollstän
 
 ## REST und MCP
 
-Alle Operationen rufen denselben Service `accounting/reconciliation.py` auf. REST-Einstieg ist `/api/reconciliation/<operation>/`.
+REST und MCP verwenden dieselben Dienste `accounting/reconciliation.py`, `bank_state.py` und `bank_identity.py`. REST-Einstieg ist `/api/reconciliation/<operation>/`.
 
 | REST | MCP | Recht |
 | --- | --- | --- |
@@ -57,13 +57,18 @@ Alle Operationen rufen denselben Service `accounting/reconciliation.py` auf. RES
 | POST `policy/` | `set_bank_automation_policy(request=…)` | admin |
 | GET `accounts/?company_id=…&period=YYYY-MM` | `get_bank_account_coverage` | read |
 | POST `coverage/` | `set_bank_month_coverage(request=…)` | process |
+| GET `identity-candidates/?duplicate_id=…` | `get_bank_identity_candidates` | read |
+| GET `identity-preview/?duplicate_id=…&canonical_id=…` | `preview_bank_identity_merge` | read |
+| POST `identity-merge/` | `merge_bank_transaction_identity(request=…)` | process |
+| POST `identity-dispute/` | `dispute_bank_transaction_identity(request=…)` | process |
+| GET `identity-history/?transaction_id=…` | `get_bank_identity_history` | read |
 
 ### Firmenweite Listenfilter (Folgearbeit)
 
 Optionale Parameter gelten identisch für REST und die genannten MCP-Werkzeuge; ältere Aufrufe ohne Filter bleiben gültig:
 
 - Rechnungen: `state=all|open|overdue|unresolved|review|unmatched|paid|partially_paid`, `kind=incoming_invoice|outgoing_invoice`, `search` und `as_of=YYYY-MM-DD`.
-- Bank: `state=all|open|unallocated|review|pending|reversed`, optional `account_id`, `direction=CRDT|DBIT` und `search`. Fremde Konten liefern 404. `reversed` bezeichnet die durch Bankrückbuchung aufgehobene **Originalbewegung**, nicht jede ungeklärte Rückbuchungszeile.
+- Bank: `state=all|open|unallocated|review|pending|reversed|merged`, optional `account_id`, `direction=CRDT|DBIT` und `search`. Fremde Konten liefern 404. `reversed` bezeichnet die durch Bankrückbuchung aufgehobene **Originalbewegung**, nicht jede ungeklärte Rückbuchungszeile.
 - `search` (max. 200 Zeichen) sucht Rechnungsnummer, Originalname und Rechnungspartei bzw. Verwendungszweck, Bankreferenz, Bankpartei und IBAN; keine unbeschränkte Volltext-/OCR-Suche.
 - `open` umfasst unbezahlte/teilbezahlte/ungeklärte Rechnungen; bei Bankbewegungen verfügbaren Rest **oder** Prüfbedarf. `unmatched` bezeichnet Rechnungen ohne aktive Zuordnung, nicht einen Nachweis des Nichtbezahltseins. `unallocated` bedeutet technisch verfügbarer Rest; pending/ungeklärte Quellen bleiben trotzdem durch die bestehenden Zuordnungsguards gesperrt.
 - `review_reasons` enthält konkrete Prüfgründe: ungeklärter Betrag/Währung, unbestätigte Rechnung, fehlende Fälligkeit, bestehende Dokument-/Bankwidersprüche, pending-Status, ungeklärter Rückbuchungsbezug oder fehlende Verwendungszweckreferenz. Das ist keine neue Sicherheitsskala und kein vollständiger globaler Kandidatenlauf; mehrdeutige Rechnungsreferenzen erklärt weiterhin der separate Kandidatendienst.
@@ -92,6 +97,22 @@ Erklärungen bleiben mit Benutzer, Begründung, Quellenversionen/-prüfsummen un
 
 Sperrreihenfolge ist Actor → Firma → Quellendokumente; REST/MCP/UI verwenden denselben Dienst `bank_state.py`. Kontrollereignisse und idempotente Receipts werden atomar mit der Policy/Erklärung gespeichert. Historische Zahlungs-/Paket-Snapshots und Originale bleiben unverändert. Migration `0010` vereinigt die beiden bereits vorhandenen, inhaltsgleichen `0009`-Mergepfade aus Draft und main; `0011` ergänzt nur neue Kontrolltabellen. Keine bestehenden Erklärungen oder Zahlungen werden erfunden.
 
+### Explizite CAMT-Identitätsauflösung (Folge-Draft)
+
+Migration `0012` ergänzt nullable Verknüpfungen, dauerhafte Identitätsprüfhinweise und `BankIdentityResolution`. Bestehende Bewegungen, Bankdaten, Quellenzuordnungen und Zahlungen werden nicht umgeschrieben; es findet kein automatischer Identitätsbackfill statt.
+
+Die UI unter „Bankbewegungen“ und REST/MCP bieten genau eine konservative Paarauflösung: **eine ungenutzte, quellenspezifische Beobachtung mit ausschließlich fehlender Bankkennung** kann einer bereits bankidentifizierten, gebuchten, widerspruchsfreien Bewegung desselben Firmenkontos zugeordnet werden. Bankseitige **TxId und Gegenkonto** müssen übereinstimmen, ebenso Betrag, Währung, Richtung, Buchungs-/Wertstellungsdatum, Partei und Verwendungszweck. Die Originale müssen aktiv, geprüft, sauber und CAMT sein. Betragsgleichheit oder `EndToEndId` allein reicht nicht. Weitere unverknüpfte Bewegungen mit derselben TxId, fremde Konten/Firmen, pending-/Rückbuchungsfälle, bereits verwendete Beobachtungen **einschließlich aufgehobener Zahlungshistorie**, Ketten und Widersprüche bleiben gesperrt. Bereits korrekt vorhandene Zahlungen an der kanonischen Bewegung dürfen bestehen bleiben.
+
+Kandidaten/Vorschau sind keine Freigabe und keine Reservierung: Schreiben braucht beide Bewegungs- und sämtliche aktuellen Quellenversionen, Begründung und Idempotenzschlüssel. Actor → Firma → Bankbewegungen (stabile ID-Reihenfolge) → Originaldokumente werden gesperrt; danach werden hashgeprüfte Originalbytes erneut deterministisch geparst und die konkreten Ntry-/TxDtls-Belegstellen gegen die gespeicherten Fakten geprüft. Geänderte Versionen/Originalwidersprüche => 409, fremde Bewegung => 404, Quarantäne => 423. Kein Client darf Bankfakten überschreiben oder Quellenbeweise selbst behaupten. Der Prüfstand speichert Benutzer, Grund, Regelversion, Originalprüfsummen, Locator und Quellenversionen. Quellen bleiben bei ihrer ursprünglichen Beobachtung, bestehende Allocations und deren eingefrorene Evidenz bleiben unverändert.
+
+Die verknüpfte Beobachtung bleibt in `all`/`merged` und an ihren Originalen sichtbar, hat aber immer **verfügbar = 0** und kann keine Zahlung erhalten. Ihre ursprüngliche Missing-ID-Prüfmeldung bleibt als `original_issues` und in der Datenbank erhalten, nicht als weiterhin offener effektiver Prüffall. Kanonische Quellenprojektionen und neue Allocation-Evidenz umfassen auch die verknüpften Originale (`observation_transaction_id` erhält den ursprünglichen Eigentümer). Normalisierung erzeugt keine zweite verbrauchbare Bewegung; die verknüpfte Beobachtung konkurriert auch nicht als zweites Original bei eindeutigen Bankrückbuchungen. Kontoaggregate zählen kanonische Bewegungen und verknüpfte Beobachtungen getrennt. Das Addieren aller sichtbaren Rohzeilen ist kein zulässiger Zahlungssaldo.
+
+Eine explizite **Beanstandung** mit beiden aktuellen Bewegungsversionen markiert den Identitätsbezug und die kanonische Bankdeckung dauerhaft als strittig. Sie lässt Betrag, Quellen, Zahlungshistorie und Verknüpfung bestehen: keine automatische Entflechtung, keine Löschung und kein erneutes Freigeben bereits verbrauchbaren Geldes. Reimport entfernt diese Hinweise nicht. Ein danach nötiger finanzieller Korrektur-/Umbuchungsworkflow bleibt separat offen. Eine Sicherheitsbeanstandung darf auch ohne erneuten Zugriff auf ein gesperrtes Original gespeichert werden; Bankstatus und Audit mit Originalbezügen bleiben dann sicherheitsgesperrt. Quarantäne einer verknüpften Quelle sperrt auch die kanonische Bankdeckung.
+
+Bankversionen und Bankdeckung gehen in neue Zahlungsstände/Nachträge ein; alte Paketbytes bleiben unverändert. Identitätsaktionen selbst erzeugen oder widerrufen keine Zahlung (`payment_effect=none`) und führen keine neue automatische Rechnungszuordnung aus. Danach bewusst neu gestartete Abgleiche verwenden weiterhin die bestehende Automatikpolicy und deren konservative Regeln.
+
+Begrenzungen: maximal 20 Kandidaten mit sichtbarem Trunkierungshinweis, 100 eindeutige Originalquellen pro Schreibauftrag, insgesamt höchstens das konfigurierte Datei-Bytebudget (standardmäßig 25 MiB) und 10.000 geparste Buchungszeilen pro Originalprüfung; Historie maximal 100 Ereignisse. Überschreitungen werden gesperrt, nicht still als geprüft ausgegeben. Mehrfach-/Gruppenidentitäten, finanziell bereits verwendete Doppelbeobachtungen, geänderte Bankreferenzen, Feldkorrekturen, PDF-Verknüpfung und neue Layouts sind damit ausdrücklich nicht allgemein gelöst. Echte anonymisierte Bankabnahme bleibt offen.
+
 ### Sicherheitssperren nach #18
 
 Die Bankadapter umgehen die Quarantäne nicht: Kandidaten und Rechnungslisten berücksichtigen nur aktuell als sauber markierte Dokumente mit passender Scan-Prüfsumme. Direkter Zahlungsstatus und neue Zuordnungen prüfen die Rechnung und alle beteiligten Bank-/Rückbuchungsquellen. Bei später gesperrten Quellen liefern die betroffenen Banklisten/Statusprojektionen einen kontrollierten **423**, statt alte extrahierte Bankdaten oder eine sichere Deckung zu behaupten. Auch ein erneuter Firmenabgleich wird bis zur Quellenprüfung gesperrt, wenn bereits normalisierte Bankquellen nicht mehr sauber sind. Historie/Originale werden dabei nicht gelöscht oder still aufgehoben. Der Sicherheitsworkflow aus #18 bleibt zuständig; kein neuer Freigabeweg im Bankdienst.
@@ -119,7 +140,7 @@ Dieser Stand erzeugt **keinen zweiten fachlichen Invoice-Stamm**: `PaymentAlloca
 ## Verbleibend / vor vollständiger Abnahme von #10
 
 - PDF-only-Extraktion und kontrollierte Feldbestätigung, Quellenzusammenführung CAMT+PDF.
-- Bankkennungen nach echten anonymisierten Bankfixtures qualifizieren. Der aktuelle konservative Bankreferenzschlüssel kann bei geänderten Darstellungen einen Konflikt melden; keine automatische heuristische Zusammenführung. Fehlende Identitäten benötigen noch einen expliziten Auflösungsworkflow.
+- Bankkennungen nach echten anonymisierten Bankfixtures qualifizieren. Der aktuelle konservative Bankreferenzschlüssel kann bei geänderten Darstellungen einen Konflikt melden; keine automatische heuristische Zusammenführung. Die konservative, explizite Missing-ID→bankidentifizierte-Paarauflösung ist im Folge-Draft enthalten. Gruppen-/Mehrfachkonflikte, bereits finanziell verwendete Dubletten und geänderte Bankreferenzen benötigen weiterhin einen erweiterten Auflösungs-/Korrekturworkflow.
 - Teilrückbuchungen, mehrfach verwendete Originalreferenzen und banklayoutspezifische Rückgabeinformationen außerhalb der konservativ unterstützten `RvslInd`-/`RtrInf`-/Bankreferenz-/TxId-Regel bleiben manuell zu prüfen. Kein automatischer anteiliger Saldoausgleich aufgrund Betrag oder Rechnungsnummer.
 - Vollständiger fachlicher Storno-/Gutschrift-/Erstattungsworkflow, manuelle Nichtbankzahlungen und deren spätere Bankbestätigung gemeinsam mit #9. Dieser CAMT-Stand deckt normale ER/AR und bankbasierte Teil-/Sammelzahlung ab, keine komplette Buchhaltung.
 - Weitergehende Auszugs-/Saldo-/Seitenlückenqualifikation anhand realer anonymisierter Bankbeispiele. Kontoweiser beobachteter Datenstand, Monatskonvention, explizite quellenbezogene Erklärungen und persistente Firmen-Automatikpolicy sind im Folge-Draft enthalten; kein Nachweis bankseitig lückenloser Abdeckung und kein Ersatz für reale Abnahme.

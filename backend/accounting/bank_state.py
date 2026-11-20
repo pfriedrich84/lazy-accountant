@@ -288,9 +288,10 @@ def account_overview(actor, company_id, period, cursor=0, limit=50):
         )
         stats = (
             transactions.aggregate(
-                total=Count("id"),
-                latest_booked=Max("booking_date", filter=Q(booked=True)),
-                pending=Count("id", filter=Q(booked=False)),
+                total=Count("id", filter=Q(merged_into__isnull=True)),
+                latest_booked=Max("booking_date", filter=Q(booked=True, merged_into__isnull=True)),
+                pending=Count("id", filter=Q(booked=False, merged_into__isnull=True)),
+                merged=Count("id", filter=Q(merged_into__isnull=False)),
             )
             if not blocked
             else {}
@@ -339,6 +340,7 @@ def account_overview(actor, company_id, period, cursor=0, limit=50):
                 "coverage": data,
                 "latest_booked_date": str(stats["latest_booked"]) if stats.get("latest_booked") else None,
                 "transaction_count": stats.get("total"),
+                "merged_observation_count": stats.get("merged"),
                 "pending_count": stats.get("pending"),
                 "security_blocked": blocked,
                 "statements": [

@@ -18,7 +18,7 @@ from iso4217 import Currency
 
 from . import services, storage
 from .auth import DomainError
-from .bank_parser import reconciliation_entries
+from .bank_parser import MISSING_IDENTITY, reconciliation_entries
 from .models import (
     Account,
     BankTransaction,
@@ -61,8 +61,25 @@ def _require_clean_document(doc):
         raise DomainError("Finanzquelle sicherheitsgesperrt. Dokumentprüfung erforderlich.", 423)
 
 
+def _all_bank_sources(tx):
+    """One canonical movement may carry additional, explicitly linked observations."""
+    duplicates = list(tx.merged_duplicates.all())
+    if any(d.company_id != tx.company_id or d.account_id != tx.account_id for d in duplicates):
+        raise DomainError("Inkonsistente Firmen-/Kontogrenze der Bankidentität.", 409)
+    sources = list(tx.sources.all()) + [
+        source for duplicate in duplicates for source in duplicate.sources.all()
+    ]
+    if any(s.document.company_id != tx.company_id or s.document.account_id != tx.account_id for s in sources):
+        raise DomainError("Inkonsistente Firmen-/Kontogrenze der Bankquelle.", 409)
+    return sources
+
+
+def _bank_notes(tx):
+    return tx.review_points + tx.identity_review_points
+
+
 def _require_clean_sources(tx):
-    for source in tx.sources.all():
+    for source in _all_bank_sources(tx):
         _require_clean_document(source.document)
 
 
@@ -92,7 +109,10 @@ def status_for_document(doc, as_of=None):
         rows = list(
             doc.payment_allocations.select_related("transaction", "reversed_by_bank_transaction")
             .prefetch_related(
-                "reversed_by_bank_transaction__sources__document", "transaction__sources__document"
+                "reversed_by_bank_transaction__sources__document",
+                "transaction__sources__document",
+                "reversed_by_bank_transaction__merged_duplicates__sources__document",
+                "transaction__merged_duplicates__sources__document",
             )
             .order_by("created_at", "id")
         )
@@ -145,10 +165,10 @@ def status_for_document(doc, as_of=None):
         due_date = date.fromisoformat(due) if due else None
     except ValueError, TypeError:
         due_date = None
-    disputed = any(a.transaction.review_points for a in active)
+    disputed = any(_bank_notes(a.transaction) for a in active)
     return {
         **result,
-        "assessment_notes": sorted({point for a in active for point in a.transaction.review_points}),
+        "assessment_notes": sorted({point for a in active for point in _bank_notes(a.transaction)}),
         "status": "paid" if remaining <= 0 else "partially_paid" if paid else "unpaid",
         "currency": currency,
         "gross": str(gross),
@@ -178,12 +198,28 @@ def transaction_data(tx):
         linked_reversal_id = (
             BankTransaction.objects.filter(reversal_of=tx).values_list("id", flat=True).first()
         )
+    resolution = getattr(tx, "identity_resolution", None)
     return {
         "id": str(tx.id),
         "version": tx.version,
+        "merged_into_id": str(tx.merged_into_id) if tx.merged_into_id else None,
+        "canonical_version": tx.merged_into.version if tx.merged_into_id else tx.version,
+        "identity_review_points": tx.identity_review_points,
+        "identity_resolution": {
+            "id": resolution.id,
+            "actor_id": resolution.actor_id,
+            "reason": resolution.reason,
+            "created_at": resolution.created_at.isoformat(),
+            "disputed_at": resolution.disputed_at.isoformat() if resolution.disputed_at else None,
+            "dispute_reason": resolution.dispute_reason,
+        }
+        if resolution
+        else None,
         "account_id": tx.account_id,
         "amount": str(tx.amount),
-        "available": str(Decimal(0) if tx.reversal or linked_reversal_id else tx.amount - used),
+        "available": str(
+            Decimal(0) if tx.reversal or linked_reversal_id or tx.merged_into_id else tx.amount - used
+        ),
         "currency": tx.currency,
         "direction": tx.direction,
         "booking_date": str(tx.booking_date) if tx.booking_date else None,
@@ -197,15 +233,18 @@ def transaction_data(tx):
         "reversal_applied_at": tx.reversal_applied_at.isoformat() if tx.reversal_applied_at else None,
         "booked": tx.booked,
         "reversal": tx.reversal,
-        "issues": tx.issues + tx.review_points,
+        "original_issues": tx.issues,
+        "issues": [point for point in tx.issues if not (tx.merged_into_id and point == MISSING_IDENTITY)]
+        + _bank_notes(tx),
         "sources": [
             {
                 "document_id": s.document_id,
+                "observation_transaction_id": str(s.transaction_id),
                 "document_version": s.document_version,
                 "locator": s.locator,
                 "parser_version": s.parser_version,
             }
-            for s in tx.sources.all()
+            for s in _all_bank_sources(tx)
         ],
     }
 
@@ -243,7 +282,7 @@ def list_transactions(
 ):
     actor.require(company_id)
     cursor, limit, search = _list_options(cursor, limit, search)
-    if state not in {"all", "open", "unallocated", "review", "pending", "reversed"}:
+    if state not in {"all", "open", "unallocated", "review", "pending", "reversed", "merged"}:
         raise DomainError("Unbekannter Bankbewegungsfilter.")
     if direction not in {None, "CRDT", "DBIT"}:
         raise DomainError("Richtung muss CRDT oder DBIT sein.")
@@ -274,18 +313,19 @@ def list_transactions(
                 BankTransaction.objects.filter(reversal_of=OuterRef("pk")).values("id")[:1]
             ),
         )
-        .prefetch_related("sources__document")
+        .select_related("merged_into", "identity_resolution")
+        .prefetch_related("sources__document", "merged_duplicates__sources__document")
         .order_by("id")
     )
 
     def project(tx):
         row = transaction_data(tx)
-        reasons = list(row["issues"])
-        if not row["booked"]:
+        reasons = list(row["identity_review_points"] if row["merged_into_id"] else row["issues"])
+        if not row["booked"] and not row["merged_into_id"]:
             reasons.append("Buchungsstatus ausstehend oder ungeklärt")
         if row["reversal"] and not row["reversal_of_id"]:
             reasons.append("Rückbuchungsbezug ungeklärt")
-        if not row["remittance"] and not row["reversal"]:
+        if not row["remittance"] and not row["reversal"] and not row["merged_into_id"]:
             reasons.append("Keine Rechnungsreferenz im Verwendungszweck")
         row["review_reasons"] = sorted(set(reasons))
         return row
@@ -299,6 +339,7 @@ def list_transactions(
             or (state == "review" and bool(row["review_reasons"]))
             or (state == "pending" and not row["booked"])
             or (state == "reversed" and bool(row["reversed_by_id"]))
+            or (state == "merged" and bool(row["merged_into_id"]))
         )
 
     return {
@@ -339,7 +380,12 @@ def list_invoice_statuses(
         )
     history = (
         PaymentAllocation.objects.select_related("transaction", "reversed_by_bank_transaction")
-        .prefetch_related("reversed_by_bank_transaction__sources__document", "transaction__sources__document")
+        .prefetch_related(
+            "reversed_by_bank_transaction__sources__document",
+            "transaction__sources__document",
+            "reversed_by_bank_transaction__merged_duplicates__sources__document",
+            "transaction__merged_duplicates__sources__document",
+        )
         .order_by("created_at", "id")
     )
     qs = qs.prefetch_related(
@@ -467,13 +513,13 @@ def _apply_bank_reversals(actor, company_id):
     """
     transactions = list(
         BankTransaction.objects.select_for_update()
-        .filter(company_id=company_id)
-        .prefetch_related("sources__document")
+        .filter(company_id=company_id, merged_into__isnull=True)
+        .prefetch_related("sources__document", "merged_duplicates__sources__document")
         .order_by("id")
     )
     for movement in transactions:
         _require_clean_sources(movement)
-    originals = [t for t in transactions if not t.reversal]
+    originals = [t for t in transactions if not t.reversal and not t.merged_into_id]
     reviews = {t.id: [] for t in transactions}
     applied = []
     already_reversed = {t.reversal_of_id for t in transactions if t.reversal_of_id}
@@ -575,7 +621,7 @@ def _apply_bank_reversals(actor, company_id):
 
 def _candidate_rows(tx):
     _require_clean_sources(tx)
-    if tx.sources.filter(document__is_excluded=True).exists():
+    if tx.merged_into_id or any(s.document.is_excluded for s in _all_bank_sources(tx)):
         return []
     kind = "outgoing_invoice" if tx.direction == "CRDT" else "incoming_invoice"
     docs = Document.objects.filter(
@@ -626,6 +672,7 @@ def _candidate_rows(tx):
             amount=tx.amount,
             booked=True,
             reversal=False,
+            merged_into__isnull=True,
         ).exclude(id=tx.id)
         if any(
             not other.issues
@@ -643,7 +690,7 @@ def _candidate_rows(tx):
             not tx.booked
             or tx.reversal
             or tx.issues
-            or tx.review_points
+            or _bank_notes(tx)
             or BankTransaction.objects.filter(reversal_of=tx).exists()
         ):
             reasons.append("Bankquelle nicht eindeutig gebucht/identifiziert")
@@ -674,7 +721,11 @@ def candidates(actor, transaction_id):
 def _allocate(actor, tx, doc, amount, decision, reason):
     _require_clean_document(doc)
     _require_clean_sources(tx)
-    if doc.is_excluded or tx.sources.filter(document__is_excluded=True).exists():
+    if tx.merged_into_id:
+        raise DomainError(
+            "Beobachtung ist einer kanonischen Bewegung zugeordnet; nicht erneut verbrauchbar.", 409
+        )
+    if doc.is_excluded or any(s.document.is_excluded for s in _all_bank_sources(tx)):
         raise DomainError("Ausgeschlossene Rechnung/Bankquelle kann keine neue Zahlung belegen.", 409)
     gross, currency = _invoice(doc)
     if currency != tx.currency or tx.direction != ("CRDT" if doc.kind == "outgoing_invoice" else "DBIT"):
@@ -685,7 +736,7 @@ def _allocate(actor, tx, doc, amount, decision, reason):
         not tx.booked
         or tx.reversal
         or tx.issues
-        or tx.review_points
+        or _bank_notes(tx)
         or BankTransaction.objects.filter(reversal_of=tx).exists()
     ):
         raise DomainError("Ungeklärte/nicht gebuchte Bankbewegung kann keine Zahlung belegen.", 409)
@@ -706,7 +757,7 @@ def _allocate(actor, tx, doc, amount, decision, reason):
             "bank_version": tx.version,
             "document_version": doc.version,
             "rule_version": RULE_VERSION if decision == "rule_confirmed" else None,
-            "source_ids": list(tx.sources.values_list("id", flat=True)),
+            "source_ids": [s.id for s in _all_bank_sources(tx)],
             "verified_party_ids": list(
                 VerifiedBankParty.objects.filter(
                     company_id=tx.company_id,

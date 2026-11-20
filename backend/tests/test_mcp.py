@@ -626,3 +626,71 @@ def test_real_mcp_exclusion_restore_and_rest_share_contract(mcp_url, actor, comp
 
     asyncio.run(scenario())
     assert Document.objects.get(id=doc["id"]).revisions.count() == 3
+
+
+@pytest.mark.django_db(transaction=True)
+def test_identity_resolution_real_mcp_preserves_sources_and_scopes(mcp_url, actor, companies):
+    from test_bank_identity import pair
+    from accounting.models import BankIdentityResolution, BankTransactionSource
+
+    _, _, duplicate_id, canonical_id = pair(actor, companies[0])
+    token = issue_token(actor, "identity", [companies[0].id], ["read", "process"])["token"]
+    readonly = issue_token(actor, "identity-readonly", [companies[0].id], ["read"])["token"]
+
+    async def scenario():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+
+                async def call(name, arguments):
+                    response = await client.call_tool(name, arguments)
+                    assert not response.is_error, response
+                    value = response.structured_content
+                    return value["result"] if value and set(value) == {"result"} else value
+
+                candidates = await call("get_bank_identity_candidates", {"duplicate_id": duplicate_id})
+                assert candidates["items"][0]["canonical_id"] == canonical_id
+                preview = await call(
+                    "preview_bank_identity_merge",
+                    {"duplicate_id": duplicate_id, "canonical_id": canonical_id},
+                )
+                payload = {
+                    k: preview[k]
+                    for k in [
+                        "duplicate_id",
+                        "canonical_id",
+                        "duplicate_version",
+                        "canonical_version",
+                        "document_versions",
+                    ]
+                }
+                payload.update(reason="Originale explizit geprüft", idempotency_key="mcp-identity-merge")
+                async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + readonly}) as read_http:
+                    async with Client(
+                        streamable_http_client(mcp_url + "/mcp/", http_client=read_http)
+                    ) as read_client:
+                        assert (
+                            await read_client.call_tool(
+                                "merge_bank_transaction_identity", {"request": payload}
+                            )
+                        ).is_error
+                merged = await call("merge_bank_transaction_identity", {"request": payload})
+                assert await call("merge_bank_transaction_identity", {"request": payload}) == merged
+                assert merged["payment_effect"] == "none"
+                await call(
+                    "dispute_bank_transaction_identity",
+                    {
+                        "request": {
+                            "duplicate_id": duplicate_id,
+                            "duplicate_version": merged["duplicate_version"],
+                            "canonical_version": merged["canonical_version"],
+                            "reason": "Bezug nachträglich zur Prüfung",
+                            "idempotency_key": "mcp-identity-dispute",
+                        }
+                    },
+                )
+                history = await call("get_bank_identity_history", {"transaction_id": canonical_id})
+                assert len(history["items"]) == 2
+
+    asyncio.run(scenario())
+    assert BankIdentityResolution.objects.get().disputed_at
+    assert BankTransactionSource.objects.count() == 2

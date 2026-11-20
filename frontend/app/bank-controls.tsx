@@ -33,6 +33,7 @@ interface AccountState {
   coverage: Coverage;
   latest_booked_date: string | null;
   transaction_count: number | null;
+  merged_observation_count?: number | null;
   pending_count: number | null;
   security_blocked: boolean;
   statements_truncated?: boolean;
@@ -111,8 +112,10 @@ function AccountCoverage({
         )}
         <Typography variant="body2">
           Letzte beobachtete gebuchte Bewegung (alle Monate):{" "}
-          {account.latest_booked_date || "keine sichere Angabe"} · Bewegungen:{" "}
-          {account.transaction_count ?? "gesperrt"} · ausstehend:{" "}
+          {account.latest_booked_date || "keine sichere Angabe"} · Normalisierte
+          Bewegungen: {account.transaction_count ?? "gesperrt"} ·
+          zusammengeführte Beobachtungen:{" "}
+          {account.merged_observation_count ?? "keine Angabe"} · ausstehend:{" "}
           {account.pending_count ?? "gesperrt"}
         </Typography>
         {account.security_blocked && (

@@ -352,6 +352,10 @@ class BankTransaction(models.Model):
     reversal = models.BooleanField(default=False)
     references = models.JSONField(default=dict)
     review_points = models.JSONField(default=list)
+    identity_review_points = models.JSONField(default=list)
+    merged_into = models.ForeignKey(
+        "self", null=True, on_delete=models.PROTECT, related_name="merged_duplicates"
+    )
     reversal_of = models.OneToOneField(
         "self", null=True, on_delete=models.PROTECT, related_name="bank_reversal"
     )
@@ -366,6 +370,36 @@ class BankTransaction(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["company", "account", "identity"], name="unique_bank_identity"),
             models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_bank_amount"),
+            models.CheckConstraint(
+                condition=~models.Q(merged_into=models.F("id")), name="bank_identity_not_self"
+            ),
+        ]
+
+
+class BankIdentityResolution(models.Model):
+    """Explicit, source-preserving identity link; never moves a financial allocation."""
+
+    duplicate = models.OneToOneField(
+        BankTransaction, on_delete=models.PROTECT, related_name="identity_resolution"
+    )
+    canonical = models.ForeignKey(
+        BankTransaction, on_delete=models.PROTECT, related_name="identity_resolutions"
+    )
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    reason = models.CharField(max_length=1000)
+    evidence = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    disputed_at = models.DateTimeField(null=True)
+    disputed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="disputed_bank_identities"
+    )
+    dispute_reason = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(duplicate=models.F("canonical")), name="identity_resolution_not_self"
+            )
         ]
 
 

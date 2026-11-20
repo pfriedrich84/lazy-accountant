@@ -178,6 +178,14 @@ class Reconciliation(APIView):
 
         actor = request_actor(request)
         p = request.query_params
+        if action in {"identity-preview", "identity-candidates", "identity-history"}:
+            from . import bank_identity
+
+            if action == "identity-preview":
+                return Response(bank_identity.preview(actor, p.get("duplicate_id"), p.get("canonical_id")))
+            if action == "identity-candidates":
+                return Response(bank_identity.candidates(actor, p.get("duplicate_id")))
+            return Response(bank_identity.history(actor, p.get("transaction_id")))
         if action == "policy":
             from .bank_state import get_policy
 
@@ -229,8 +237,11 @@ class Reconciliation(APIView):
 
         from . import reconciliation as bank
         from .bank_state import set_coverage, set_policy
+        from .bank_identity import merge as merge_identity, dispute as dispute_identity
         from .payment_schemas import (
             AllocationRequest,
+            BankIdentityMergeRequest,
+            BankIdentityDisputeRequest,
             BankCoverageRequest,
             BankPolicyRequest,
             ReconcileRequest,
@@ -240,6 +251,8 @@ class Reconciliation(APIView):
         )
 
         operations = {
+            "identity-merge": (BankIdentityMergeRequest, merge_identity),
+            "identity-dispute": (BankIdentityDisputeRequest, dispute_identity),
             "policy": (BankPolicyRequest, set_policy),
             "coverage": (BankCoverageRequest, set_coverage),
             "normalize": (ReconcileRequest, bank.reconcile_document),
@@ -255,7 +268,7 @@ class Reconciliation(APIView):
             payload = schema.model_validate(request.data).model_dump(mode="json")
         except ValidationError as exc:
             raise DomainError(
-                "Ungültiger Zahlungsauftrag.", details=exc.errors(include_context=False)
+                "Ungültiger Zahlungsauftrag.", details=exc.errors(include_context=False, include_input=False)
             ) from exc
         return Response(function(request_actor(request), **payload))
 

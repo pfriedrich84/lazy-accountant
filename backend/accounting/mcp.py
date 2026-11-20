@@ -20,6 +20,8 @@ from .payment_schemas import (
     AllocationRequest,
     BankCoverageRequest,
     BankPolicyRequest,
+    BankIdentityMergeRequest,
+    BankIdentityDisputeRequest,
     ReconcileRequest,
     ReverseAllocationRequest,
     RevokePartyRequest,
@@ -181,6 +183,48 @@ async def save_document_result(
 ) -> dict[str, Any]:
     """Vollständiges strukturiertes Ergebnis mit Ausgangsversion speichern. Unbekanntes null lassen; approve nur ohne Prüfpunkte."""
     return await call(ctx, services.save_result, result.model_dump(mode="json"), "agent:" + run_id)
+
+
+@server.tool()
+async def get_bank_identity_candidates(duplicate_id: str, ctx: Context) -> dict[str, Any]:
+    """Belegbare Zielbewegungen für eine fehlende Bankkennung lesen. TxId/Gegenkonto/Originalbezug, nie Betrag oder EndToEndId allein. Keine Zahlung erzeugen."""
+    from .bank_identity import candidates
+
+    return await call(ctx, candidates, duplicate_id)
+
+
+@server.tool()
+async def preview_bank_identity_merge(duplicate_id: str, canonical_id: str, ctx: Context) -> dict[str, Any]:
+    """Firmengebundene Vorschau mit Bank-/Quellenversionen und Sperrgründen; keine Reservierung oder Zahlungsbestätigung."""
+    from .bank_identity import preview
+
+    return await call(ctx, preview, duplicate_id, canonical_id)
+
+
+@server.tool()
+async def merge_bank_transaction_identity(request: BankIdentityMergeRequest, ctx: Context) -> dict[str, Any]:
+    """Fehlende Bankkennung explizit auf belegte kanonische Bewegung auflösen, Originalbytes prüfen. Keine Quellen/Zahlungen verschieben; finanziell verwendete oder widersprüchliche Beobachtungen bleiben gesperrt."""
+    from .bank_identity import merge
+
+    return await call(ctx, merge, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def dispute_bank_transaction_identity(
+    request: BankIdentityDisputeRequest, ctx: Context
+) -> dict[str, Any]:
+    """Zusammenführung begründet beanstanden: Bankdeckung wird strittig, keine Zahlung löschen und keinen Betrag erneut freigeben. Vollständiger Korrekturworkflow bleibt separat."""
+    from .bank_identity import dispute
+
+    return await call(ctx, dispute, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def get_bank_identity_history(transaction_id: str, ctx: Context) -> dict[str, Any]:
+    """Identitätsentscheidungen mit Originalbezug/Audit lesen; Sicherheits- und Firmenrechte erhalten."""
+    from .bank_identity import history
+
+    return await call(ctx, history, transaction_id)
 
 
 @server.tool()
