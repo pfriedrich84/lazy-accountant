@@ -205,6 +205,7 @@ export interface Page {
   next_cursor: string | null;
 }
 export interface Package {
+  removed?: boolean;
   id: string;
   company_id: number;
   periods: string[];

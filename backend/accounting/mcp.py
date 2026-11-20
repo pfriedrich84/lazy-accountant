@@ -532,7 +532,7 @@ async def list_packages(company_id: int, ctx: Context, period: str | None = None
         from .models import Package
 
         a.require(company_id)
-        rows = Package.objects.filter(company_id=company_id).order_by("-version")
+        rows = Package.objects.filter(company_id=company_id, removal__isnull=True).order_by("-version")
         return [packages.package_data(p) for p in rows if period is None or period in p.periods]
 
     return await call(ctx, get)
@@ -573,9 +573,32 @@ async def list_month_folders(
 async def get_package(package_id: str, ctx: Context) -> dict[str, Any]:
     """Paketversion, eingefrorene Inhaltsliste und Prüfsumme lesen; authentifizierten Download erhalten."""
     data = await call(ctx, lambda a: packages.package_data(packages.get_package(a, package_id), True))
-    if not data["security_blocked"]:
+    if not data["security_blocked"] and not data["removed"]:
         data["download_url"] = f"/api/packages/{package_id}/download/"
     return data
+
+
+@server.tool()
+async def preview_package_removal(company_id: int, package_id: str, ctx: Context) -> dict[str, Any]:
+    """Firmengebundene Löschvorschau mit Snapshot, Referenzen, Jobs und Sperrgründen; verändert nichts."""
+    from .package_removal import preview
+
+    return await call(ctx, preview, company_id, package_id)
+
+
+@server.tool()
+async def remove_package(
+    company_id: int,
+    package_id: str,
+    expected_version: int,
+    reason: str,
+    idempotency_key: str,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Nur auf ausdrücklichen Löschauftrag: Paket logisch entfernen (process-Recht), ZIP bereinigen. cleanup_pending ist nicht abgeschlossen. Kein Beleg-/Zahlungsreset, keine Neuerstellung, kein Versand."""
+    from .package_removal import remove
+
+    return await call(ctx, remove, company_id, package_id, expected_version, reason, idempotency_key)
 
 
 @server.tool()

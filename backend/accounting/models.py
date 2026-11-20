@@ -275,6 +275,23 @@ class Package(models.Model):
         ]
 
 
+class PackageRemoval(models.Model):
+    package = models.OneToOneField(Package, on_delete=models.PROTECT, related_name="removal")
+    company = models.ForeignKey(Company, on_delete=models.PROTECT)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    expected_version = models.PositiveIntegerField()
+    reason = models.TextField()
+    idempotency_key = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+    zip_removed_at = models.DateTimeField(null=True)
+    cleanup_error = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["company", "idempotency_key"], name="unique_package_removal_key")
+        ]
+
+
 class PackageItem(models.Model):
     package = models.ForeignKey(Package, on_delete=models.PROTECT, related_name="items")
     document = models.ForeignKey(Document, on_delete=models.PROTECT)

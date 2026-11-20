@@ -42,6 +42,37 @@ export default function Packages() {
   const [parentId, setParentId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [jobId, setJobId] = useState("");
+  const [removalId, setRemovalId] = useState("");
+  const [removalReason, setRemovalReason] = useState("");
+  const [removalKey, setRemovalKey] = useState("");
+  const removalPreview = useQuery({
+    queryKey: ["package-removal", companyId, removalId],
+    queryFn: () =>
+      api<{
+        package: Package;
+        blockers: string[];
+        can_remove: boolean;
+        children: string[];
+        jobs: { id: string; status: string }[];
+        dispatches: { id: string; status: string }[];
+      }>(`packages/${removalId}/removal-preview/?company_id=${companyId}`),
+    enabled: !!removalId,
+  });
+  const remove = useMutation({
+    mutationFn: () =>
+      post<{ status: string }>(`packages/${removalId}/remove/`, {
+        company_id: companyId,
+        expected_version: removalPreview.data?.package.version,
+        reason: removalReason,
+        idempotency_key: removalKey,
+      }),
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: ["packages"] });
+      void cache.invalidateQueries({ queryKey: ["package"] });
+      void cache.invalidateQueries({ queryKey: ["package-removal"] });
+      setParentId("");
+    },
+  });
   const [confirmation, setConfirmation] = useState<{
     packageId: string;
     resendOf?: string;
@@ -130,6 +161,79 @@ export default function Packages() {
   const shown = selectedId ? selected.data?.snapshot : preview.data;
   return (
     <>
+      <Dialog
+        open={!!removalId}
+        onClose={() => !remove.isPending && setRemovalId("")}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Paket ausdrücklich entfernen</DialogTitle>
+        <DialogContent>
+          <ErrorAlert error={removalPreview.error || remove.error} />
+          <Alert severity="warning">
+            Nur das Paket wird entfernt. Belege und Zahlungen bleiben erhalten.
+            Es wird weder ein neues Paket erstellt noch eine E-Mail versandt.
+          </Alert>
+          {removalPreview.data && (
+            <Stack spacing={2} sx={{ mt: 2 }}>
+              <Typography>
+                Paket {removalPreview.data.package.id} · Version{" "}
+                {removalPreview.data.package.version}
+                {" · "}
+                {removalPreview.data.package.periods.join(", ")} ·{" "}
+                {bytes(removalPreview.data.package.size)}
+              </Typography>
+              <Typography>
+                Nachträge: {removalPreview.data.children.length} · Jobs:{" "}
+                {removalPreview.data.jobs.length}
+                {" · "}Versandaufträge: {removalPreview.data.dispatches.length}
+              </Typography>
+              {removalPreview.data.blockers.map((reason) => (
+                <Alert key={reason} severity="warning">
+                  {reason}
+                </Alert>
+              ))}
+              <TextField
+                label="Begründung"
+                value={removalReason}
+                multiline
+                disabled={remove.isSuccess}
+                onChange={(event) => setRemovalReason(event.target.value)}
+                slotProps={{ htmlInput: { maxLength: 2000 } }}
+              />
+            </Stack>
+          )}
+          {remove.data && (
+            <Alert
+              severity={
+                remove.data.status === "completed" ? "success" : "warning"
+              }
+              sx={{ mt: 2 }}
+            >
+              {remove.data.status === "completed"
+                ? "Paket entfernt und ZIP bereinigt."
+                : "Paket gesperrt; ZIP-Bereinigung noch ausstehend. Nicht vollständig abgeschlossen. Wartung versucht es erneut."}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={remove.isPending} onClick={() => setRemovalId("")}>
+            Schließen
+          </Button>
+          <Button
+            color="error"
+            disabled={
+              !removalPreview.data?.can_remove ||
+              !removalReason.trim() ||
+              remove.isPending ||
+              remove.isSuccess
+            }
+            onClick={() => remove.mutate()}
+          >
+            Dieses Paket entfernen
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Heading
         title="Übergabe & Versand"
         subtitle="Erst Vollständigkeit prüfen, dann einen unveränderlichen Snapshot erzeugen und ausdrücklich versenden."
@@ -240,6 +344,7 @@ export default function Packages() {
                     component="a"
                     href={`/api/packages/${selectedId}/download/`}
                     variant="outlined"
+                    disabled={selected.data?.removed}
                   >
                     ZIP herunterladen
                   </Button>
@@ -254,9 +359,21 @@ export default function Packages() {
                         resendOf: prior?.id,
                       });
                     }}
-                    disabled={send.isPending}
+                    disabled={send.isPending || selected.data?.removed}
                   >
                     Versand vorbereiten
+                  </Button>
+                  <Button
+                    color="error"
+                    disabled={selected.data?.removed}
+                    onClick={() => {
+                      setRemovalId(selectedId);
+                      setRemovalReason("");
+                      setRemovalKey(idempotencyKey());
+                      remove.reset();
+                    }}
+                  >
+                    Entfernung prüfen
                   </Button>
                 </>
               ) : (
