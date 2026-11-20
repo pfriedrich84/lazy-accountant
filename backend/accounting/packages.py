@@ -164,7 +164,11 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
                     "previous_package_id": previous["package_id"],
                 }
             )
-        if doc.security_status != "clean" or doc.scanned_sha256 != doc.sha256:
+        if doc.is_excluded:
+            # Never include these bytes. Exclusion is not a security clearance;
+            # unsafe originals and existing snapshots remain access-blocked.
+            intentional_exclusions.append({"document": data, "reason": doc.exclusion_reason})
+        elif doc.security_status != "clean" or doc.scanned_sha256 != doc.sha256:
             blocked.append({"document": data, "reason": doc.security_error or doc.security_status})
             excluded.append(
                 {
@@ -172,8 +176,6 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
                     "reason": "Sicherheitssperre: " + (doc.security_error or doc.security_status),
                 }
             )
-        elif doc.is_excluded:
-            intentional_exclusions.append({"document": data, "reason": doc.exclusion_reason})
         elif doc.period not in periods:
             excluded.append({"document": data, "reason": "Übergabemonat ungeklärt"})
         elif doc.duplicate_of_id:
@@ -228,7 +230,7 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     from .mail import import_errors
 
     return {
-        "blocked_imports": import_errors(actor, company_id),
+        "blocked_imports": import_errors(actor, company_id, include_excluded=False),
         "schema_version": 2,
         "company": {"id": company.id, "name": company.name, "folder": company.folder},
         "periods": periods,

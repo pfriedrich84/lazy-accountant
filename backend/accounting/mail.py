@@ -329,16 +329,18 @@ def scan_mailbox(job, connector=None):
             pass
 
 
-def import_errors(actor, company_id):
+def import_errors(actor, company_id, *, include_excluded=True):
     from django.db.models import Q
 
     actor.require(company_id)
-    rows = (
-        ImportSource.objects.filter(mailbox__company_id=company_id)
-        .filter(~Q(error="") | (Q(document__isnull=False) & ~Q(document__security_status="clean")))
-        .select_related("document")
-        .order_by("-id")[:200]
+    rows = ImportSource.objects.filter(mailbox__company_id=company_id).filter(
+        ~Q(error="") | (Q(document__isnull=False) & ~Q(document__security_status="clean"))
     )
+    if not include_excluded:
+        # Explicit exclusion removes the source from active package blockers, not
+        # from the audit/error list and never from quarantine or scanner checks.
+        rows = rows.exclude(document__is_excluded=True)
+    rows = rows.select_related("document").order_by("-id")[:200]
     return [
         {
             "id": row.id,

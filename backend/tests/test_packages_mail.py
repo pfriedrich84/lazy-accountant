@@ -200,6 +200,55 @@ def test_imap_alias_unknown_and_unsupported_preserved(actor, companies):
     assert mail.import_errors(actor, companies[0].id)[0]["security_status"] == "error"
 
 
+@pytest.mark.parametrize("security_status", ["error", "infected"])
+def test_excluded_unsafe_import_stays_quarantined_but_not_active_blocker(
+    user, actor, companies, security_status
+):
+    company = companies[0]
+    seed_month(user, company, classified=True)
+    mailbox = configured_mailbox(company)
+    doc = services.ingest(actor, "unreadable.bin", b"synthetic invalid bytes", company.id)["document"]
+    Document.objects.filter(id=doc["id"]).update(
+        period="2026-10", security_status=security_status, security_error="synthetic scan failure"
+    )
+    source = ImportSource.objects.create(
+        document_id=doc["id"], mailbox=mailbox, identity="unsafe-source", stable_identity="unsafe-source"
+    )
+    before = packages.package_preview(actor, company.id, ["2026-10"])
+    assert source.id in {row["id"] for row in before["blocked_imports"]}
+    services.change_document_exclusion(
+        actor,
+        doc["id"],
+        {
+            "base_version": doc["version"],
+            "reason": "Explicit user removal",
+            "idempotency_key": "remove-unsafe",
+        },
+        excluded=True,
+    )
+    after = packages.package_preview(actor, company.id, ["2026-10"])
+    assert after["blocked_imports"] == []
+    assert doc["id"] in {row["document"]["id"] for row in after["intentional_exclusions"]}
+    assert doc["id"] not in {row["id"] for row in after["documents"]}
+    assert source.id in {row["id"] for row in mail.import_errors(actor, company.id)}
+    unsafe = Document.objects.get(id=doc["id"])
+    assert unsafe.security_status == security_status
+    from accounting.security import require_clean
+
+    with pytest.raises(DomainError):
+        require_clean(unsafe)
+    package = packages.create_package(actor, company.id, ["2026-10"], "safe-exclusions")
+    assert mail.queue_dispatch(actor, package["id"], "send-safe-exclusions")["status"] == "queued"
+    restored = services.change_document_exclusion(
+        actor,
+        doc["id"],
+        {"base_version": unsafe.version, "reason": "Explicit restore", "idempotency_key": "restore-unsafe"},
+        excluded=False,
+    )
+    assert not restored["document"]["is_excluded"]
+    assert packages.package_preview(actor, company.id, ["2026-10"])["blocked_imports"]
+
+
 def create_ready_package(user, actor, company):
     seed_month(user, company, classified=True)
     mailbox = configured_mailbox(company)
