@@ -835,6 +835,60 @@ def reverse_allocation(actor, allocation_id, bank_version, reason, idempotency_k
         )
 
 
+def _closing_code(direction, reversal, references):
+    """Only explicit, opposite accounting operations may share a bank reference."""
+    code = references.get("bank_transaction_code")
+    expected = {"ACMT/MCOP/INTR": "CRDT", "ACMT/MDOP/COMM": "DBIT"}
+    return code if not reversal and expected.get(code) == direction else None
+
+
+def _source_closing_code(tx):
+    """Resolve legacy imports from their checked originals, without moving any source."""
+    _require_clean_sources(tx)
+    codes = set()
+    for source in tx.sources.select_related("document"):
+        rows = reconciliation_entries(storage.read_original(source.document))
+        row = next((r for r in rows if r["locator"] == source.locator), None)
+        if not row or any(
+            str(row[key]) != str(getattr(tx, key))
+            for key in ("bank_reference", "direction", "currency", "booking_date", "value_date")
+        ):
+            return None
+        if Decimal(row["amount"]) != tx.amount:
+            return None
+        codes.add(_closing_code(row["direction"], row["reversal"], row["references"]))
+    return next(iter(codes)) if len(codes) == 1 and None not in codes else None
+
+
+def _transaction_identity(doc, row, locator):
+    reference = row["bank_reference"]
+    if not reference:
+        return digest([doc.sha256, locator])
+    base = digest(["reversal", row["direction"], reference]) if row["reversal"] else digest([reference])
+    if row["reversal"]:
+        return base  # Keep the separately namespaced reversal workflow unchanged.
+    code = _closing_code(row["direction"], row["reversal"], row["references"])
+    identity = digest(["account-closing-v1", reference, code]) if code else base
+    # Check all prior observations, including overlapping files with missing codes.
+    # Never turn a changed amount/date or an ordinary payment into another movement.
+    for prior in BankTransaction.objects.filter(
+        company_id=doc.company_id,
+        account_id=doc.account_id,
+        bank_reference=reference,
+        reversal=row["reversal"],
+    ):
+        prior_code = _closing_code(prior.direction, prior.reversal, prior.references)
+        if code and not prior_code and prior.identity == base:
+            prior_code = _source_closing_code(prior)
+        if code and prior_code:
+            if prior_code == code:
+                identity = prior.identity  # Preserve legacy IDs, allocations and sources.
+            continue
+        if prior.identity != identity:
+            raise DomainError("Widersprüchliche Bankkennung; Abschlussidentität ungeklärt.", 409)
+    return identity
+
+
 def reconcile_document(actor, document_id, base_version, idempotency_key, auto_confirm=True):
     initial = services.get_document(actor, document_id, "process")
     if not initial.company_id:
@@ -878,13 +932,7 @@ def reconcile_document(actor, document_id, base_version, idempotency_key, auto_c
                 raise DomainError("CAMT-Konto stimmt nicht mit zugeordnetem Konto überein.")
             money(row["amount"], row["currency"])
             locator = row.pop("locator")
-            identity = (
-                digest(["reversal", row["direction"], row["bank_reference"]])
-                if row["bank_reference"] and row["reversal"]
-                else digest([row["bank_reference"]])
-                if row["bank_reference"]
-                else digest([doc.sha256, locator])
-            )
+            identity = _transaction_identity(doc, row, locator)
             if identity in seen_identities:
                 raise DomainError(
                     "Bankkennung innerhalb der Datei mehrfach vorhanden; Identität ungeklärt.", 409
@@ -933,7 +981,11 @@ def reconcile_document(actor, document_id, base_version, idempotency_key, auto_c
             BankTransactionSource.objects.get_or_create(
                 document=doc,
                 locator=locator,
-                defaults={"transaction": tx, "document_version": doc.version},
+                defaults={
+                    "transaction": tx,
+                    "document_version": doc.version,
+                    "parser_version": "reconciliation-v2",
+                },
             )
             ids.append(tx.id)
         # Bank cancellations invalidate old evidence even when new invoice auto-matching is disabled.

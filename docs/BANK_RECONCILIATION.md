@@ -28,6 +28,14 @@ Dies ist ein erster, separat prüfbarer Implementierungsstand, **keine vollstän
 - UI: firmenweiter Zahlungsstand und Bankbewegungsliste, getrennte Hinweise/Referenztreffer, Dokumentdetail mit Quellen, Zuordnung/Aufhebung, Admin-Bankdatenverifikation und CAMT-Abgleich. Listen sind paginiert; Filter/Suche wirken firmenweit vor der Seiteneinteilung. Die UI setzt die Position bei Filter-, Ansichts- und Firmenwechsel zurück.
 - Neue Pakete enthalten eingefrorene `Zahlungsstand.csv`, `.xlsx`, `.json`. Zahlungsänderungen erscheinen als `payment_changes` auch im Nachtrag bei unveränderter Dokumentrevision und ohne erneute Originaldatei. Alte ZIPs und Snapshots bleiben bytegleich.
 
+### Gemeinsame Referenz für Zinsen und Kontogebühren
+
+Die Abgleichprojektion `reconciliation-v2` erhält den ausdrücklich im CAMT angegebenen `BkTxCd` (Detail, sonst Buchung). Nur die Kombinationen **`ACMT/MCOP/INTR` mit CRDT** und **`ACMT/MDOP/COMM` mit DBIT** dürfen dieselbe Bankreferenz als zwei unterschiedliche Bewegungen desselben Firmenkontos verwenden. Der interne Schlüssel ergänzt dafür den Geschäftsvorfallcode; Originalreferenz und Originalbytes bleiben unverändert. Beträge, Daten, Zeilenpositionen oder bloße Gegenrichtung werden nicht als Ersatzkennung benutzt.
+
+Reimport, umsortierte/überlappende Dateien und einzelne Teilmengen verwenden dieselben Bewegungen. Wiederholte gleichartige Abschlusszeilen, widersprüchliche Beträge/Daten, fehlende Codes und gewöhnliche Zahlungsreferenzkonflikte bleiben atomar gesperrt. Bestehende Legacy-Bewegungen werden nur anhand ihrer sicherheitsgeprüften Originalquellen qualifiziert; ihre IDs, Quellen und Zahlungshistorie bleiben erhalten. Unbelegte Altidentitäten werden nicht automatisch umgedeutet. Rückbuchungen behalten ihren separaten Identitätsworkflow. Keine allgemeine Referenzkonfliktauflösung und keine zusätzliche Zahlungsfreigabe.
+
+Nach Deployment: das bisher blockierte Original mit aktuellem Prüfstand fachlich freigeben, dann den normalen CAMT-Abgleich mit aktueller Dokumentversion und neuem Idempotenzschlüssel ausführen. Keinen Ersatzbeleg hochladen oder Referenzen im XML erfinden. Ein früherer fehlgeschlagener Abgleich wird nicht automatisch wiederholt; gespeicherte erfolgreiche Idempotenz-Replays bleiben historisch unverändert.
+
 ## Bedienung
 
 1. Rechnung und CAMT wie bisher importieren, Firma/Konto zuordnen und Originaldaten prüfen. Das Bankkonto benötigt seine IBAN als `identifier`.

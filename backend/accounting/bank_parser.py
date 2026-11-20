@@ -97,6 +97,17 @@ def reconciliation_entries(data):
                             if len(identifier) > 300:
                                 raise ValueError("Überlange Bankreferenz")
                             references[key] = identifier
+                # Preserve the structured business code, never a label inferred from amounts.
+                code_node = detail if detail is not None else entry
+                code = [
+                    text(code_node, f"BkTxCd/Domn/{path}") for path in ("Cd", "Fmly/Cd", "Fmly/SubFmlyCd")
+                ]
+                if detail is not None and not any(code):
+                    code = [
+                        text(entry, f"BkTxCd/Domn/{path}") for path in ("Cd", "Fmly/Cd", "Fmly/SubFmlyCd")
+                    ]
+                if all(code):
+                    references["bank_transaction_code"] = "/".join(code)
                 return_info = detail is not None and detail.find("c:RtrInf", ns) is not None
                 if len(reference) > 300 or len(iban) > 100:
                     raise ValueError("Überlange Bankkennung")
