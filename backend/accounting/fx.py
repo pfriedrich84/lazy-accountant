@@ -22,6 +22,18 @@ TEXT = re.compile(
     r"CARD DATE (?P<card_date>[0-9]{4}-[0-9]{2}-[0-9]{2})(?![\w-])"
 )
 
+# Exact source-checked E-COMM layout; no whitespace normalization or prose guessing.
+ECOMM = re.compile(
+    r"E-COMM {7}(?P<original>[0-9]+,[0-9]{2}) (?P<currency>[A-Z]{3}) "
+    r"(?P<card>[A-Z][0-9]) {3}(?P<day>[0-9]{2})\.(?P<month>[0-9]{2})\. "
+    r"(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2})"
+    r"(?P<merchant>[A-Z0-9][A-Z0-9,. -]*?) [0-9]{5} [0-9]{3}"
+    r"SPESEN: (?P<fee>[0-9]+,[0-9]{2}) {2}KURS: (?P<rate>[0-9]+,[0-9]{6}) {2}"
+    r"VOM:(?P<vom>[0-9]{2}\.[0-9]{2}\.[0-9]{4})"
+)
+DIRECT = "bank currency per original currency"
+INVERSE = "original currency per bank currency"
+
 
 def rounded(value, currency):
     exponent = Currency(currency).exponent
@@ -30,11 +42,55 @@ def rounded(value, currency):
     return value.quantize(Decimal(1).scaleb(-exponent), rounding=ROUND_HALF_UP)
 
 
-def converted(amount, rate, currency):
-    # Up to 20 invoice digits and 40 rate digits; no implicit context rounding.
+def converted(amount, rate, currency, direction=DIRECT):
+    # Keep an inverse quoted rate intact; do not round its reciprocal first.
     with localcontext() as context:
         context.prec = 64
-        return rounded(amount * rate, currency)
+        value = amount / rate if direction == INVERSE else amount * rate
+        return rounded(value, currency)
+
+
+def text_evidence(detail, ns, tx):
+    spans = []
+    for index, n in enumerate(detail.findall("c:RmtInf/c:Ustrd", ns)):
+        raw = n.text or ""
+        spans.extend((index, match, "bank-text-v1") for match in TEXT.finditer(raw))
+        match = ECOMM.fullmatch(raw)
+        if match:
+            spans.append((index, match, "bank-ecomm-v1"))
+        elif "E-COMM" in raw:
+            raise ValueError("Ungültige oder mehrdeutige E-COMM-Textbelegstelle")
+    if len(spans) != 1:
+        raise ValueError("Keine eindeutige FX-Textbelegstelle nach versionierter Grammatik")
+    index, match, method = spans[0]
+    data = match.groupdict()
+    extra = {}
+    if method == "bank-ecomm-v1":
+        if tx.currency != "EUR" or tx.direction != "DBIT":
+            raise ValueError("E-COMM unterstützt nur EUR-Kartenbelastungen")
+        # The card date has no year. VOM is not evidence of that missing year.
+        date(2000, int(data["month"]), int(data["day"]))
+        if int(data["hour"]) > 23 or int(data["minute"]) > 59:
+            raise ValueError("Ungültige Kartenzeit")
+        day, month, year = (int(part) for part in data["vom"].split("."))
+        date(year, month, day)
+        extra = {
+            "card_date_text": f"{data['day']}.{data['month']}. {data['hour']}:{data['minute']}",
+            "vom_text": data["vom"],
+            "direction_basis": "unique rounded amount consistency",
+            "fee_basis": "bank currency, included; amount consistency",
+        }
+        for field in ("original", "fee", "rate"):
+            data[field] = data[field].replace(",", ".")
+        data.update(src=data["currency"], target=tx.currency, fee_currency=tx.currency, card_date="")
+    return data, {
+        "method": method,
+        "paths": [f"RmtInf/Ustrd[{index}]"],
+        "quote": match.group(0),
+        "text_start": match.start(),
+        "text_end": match.end(),
+        **extra,
+    }
 
 
 def evidence(tx):
@@ -77,7 +133,14 @@ def evidence(tx):
             if original is None and exchange is not None:
                 original = node("AmtDtls/TxAmt/Amt")
                 original_path = "AmtDtls/TxAmt/Amt"
-            structured = original is not None or exchange is not None
+            # A same-currency instructed amount is not by itself an FX assertion.
+            # Only exactly neutral settlement amounts may pass through to text.
+            exchanges = detail.findall(".//c:CcyXchg", ns)
+            amounts = detail.findall("c:AmtDtls/*/c:Amt", ns) + detail.findall("c:Amt", ns)
+            neutral = all(n.get("Ccy") == tx.currency and Decimal(n.text) == tx.amount for n in amounts)
+            structured = bool(exchanges) or not neutral
+            if not structured and node("Chrgs") is not None:
+                raise ValueError("Strukturierte Gebühren ohne vollständige FX-Angaben")
             base = {
                 "source_id": source.id,
                 "document_id": str(source.document_id),
@@ -119,20 +182,8 @@ def evidence(tx):
                     paths=[original_path, exchange_path, "Chrgs/Rcrd/Amt"],
                 )
             else:
-                spans = []
-                for index, n in enumerate(detail.findall("c:RmtInf/c:Ustrd", ns)):
-                    spans.extend((index, match) for match in TEXT.finditer(n.text or ""))
-                if len(spans) != 1:
-                    raise ValueError("Keine eindeutige FX-Textbelegstelle nach bank-fx-v1")
-                index, match = spans[0]
-                data = match.groupdict()
-                base.update(
-                    method="bank-text-v1",
-                    paths=[f"RmtInf/Ustrd[{index}]"],
-                    quote=match.group(0),
-                    text_start=match.start(),
-                    text_end=match.end(),
-                )
+                data, provenance = text_evidence(detail, ns, tx)
+                base.update(provenance)
             if data["card_date"]:
                 date.fromisoformat(data["card_date"])
             original_amount = bank.money(data["original"], data["currency"])
@@ -168,15 +219,21 @@ def evidence(tx):
                         (tx.amount - fee, tx.currency),
                     }:
                         raise ValueError("Strukturierter Detailbetrag widerspricht FX-Beleg")
-            if converted(original_amount, rate, tx.currency) + fee != tx.amount:
-                raise ValueError("Original × belegter Kurs + Gebühren stimmt nicht mit Bankbetrag überein")
+            direction = INVERSE if base["method"] == "bank-ecomm-v1" else DIRECT
+            if converted(original_amount, rate, tx.currency, direction) + fee != tx.amount:
+                raise ValueError("Original, belegter Kurs und Gebühren stimmen nicht mit Bankbetrag überein")
+            if (
+                direction == INVERSE
+                and converted(original_amount, rate, tx.currency, DIRECT) + fee == tx.amount
+            ):
+                raise ValueError("Mehrdeutige Kursrichtung im E-COMM-Text")
             base.update(
                 original_amount=str(original_amount),
                 original_currency=data["currency"],
                 bank_amount=str(tx.amount),
                 bank_currency=tx.currency,
                 rate=str(rate),
-                rate_direction="bank currency per original currency",
+                rate_direction=direction,
                 fee=str(fee),
                 card_date=data["card_date"],
                 rounding="ROUND_HALF_UP to ISO minor unit",
@@ -216,7 +273,10 @@ def _preview(actor, tx, bank_version, evidence_id, legs):
     if FX_DETAIL_DIFFERENCE in tx.issues and selected["method"] != "camt-structured-v1":
         raise DomainError("Abweichender Detailbetrag benötigt strukturierte FX-Belege.", 409)
     # Differing observations of the same movement must never be silently preferred.
-    facts = {(e["original_amount"], e["original_currency"], e["rate"], e["fee"]) for e in sources["items"]}
+    facts = {
+        (e["original_amount"], e["original_currency"], e["rate"], e["rate_direction"], e["fee"])
+        for e in sources["items"]
+    }
     if len(facts) != 1:
         raise DomainError("Mehrdeutige FX-Belege.", 409)
     active = list(tx.allocations.filter(reversed_at__isnull=True))
@@ -246,7 +306,12 @@ def _preview(actor, tx, bank_version, evidence_id, legs):
         if not fee.is_finite() or fee < 0 or fee != rounded(fee, tx.currency):
             raise DomainError("Ungültige Gebühr.")
         # Cumulative rounding keeps splits exact, including the final minor unit.
-        expected = converted(original_used + amount, Decimal(selected["rate"]), tx.currency) - principal_used
+        expected = (
+            converted(
+                original_used + amount, Decimal(selected["rate"]), tx.currency, selected["rate_direction"]
+            )
+            - principal_used
+        )
         if principal != expected:
             raise DomainError("Bankdeckung entspricht nicht dem belegten Kurs/Rundungsverfahren.")
         original_used += amount
@@ -305,6 +370,14 @@ def _preview(actor, tx, bank_version, evidence_id, legs):
         "review_notes": [
             "Händler, Referenzen, Rechnungs-/Kartendatum und abweichende Chronologie einzeln prüfen.",
             "Textauslese und Gebühren ausdrücklich bestätigen; kein Zahlungsauftrag.",
+            *(
+                [
+                    "E-COMM: Kursrichtung und EUR-Inklusivspesen nur durch Betragskonsistenz abgeleitet; "
+                    "Kartendatum ohne Jahr, VOM-Datum nicht als Karten-/Kursdatum interpretiert."
+                ]
+                if selected["method"] == "bank-ecomm-v1"
+                else []
+            ),
         ],
     }
     result["revision"] = bank.digest(result)
