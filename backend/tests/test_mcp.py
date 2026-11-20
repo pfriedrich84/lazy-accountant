@@ -397,6 +397,7 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
     inv = invoice(actor, company)
     doc = statement(actor, company)
     token = issue_token(actor, "bank", [company.id], ["read", "process"])["token"]
+    admin_token = issue_token(actor, "bank-admin", [company.id], ["read", "admin"])["token"]
     readonly = issue_token(actor, "read", [company.id], ["read"])["token"]
 
     async def scenario():
@@ -424,6 +425,42 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                 rows = await call("list_bank_transactions", {"company_id": company.id})
                 tx = rows["items"][0]
                 assert tx["id"] == txid
+                policy = await call("get_bank_automation_policy", {"company_id": company.id})
+                assert policy["enabled"] and policy["version"] == 0
+                overview = await call(
+                    "get_bank_account_coverage", {"company_id": company.id, "period": "2026-10"}
+                )
+                assert overview["items"][0]["coverage"]["effective_state"] == "confirmed"
+                coverage = await call(
+                    "set_bank_month_coverage",
+                    {
+                        "request": {
+                            "company_id": company.id,
+                            "account_id": doc["account_id"],
+                            "period": "2026-10",
+                            "expected_version": 0,
+                            "state": "confirmed",
+                            "document_ids": [doc["id"]],
+                            "document_versions": {doc["id"]: doc["version"]},
+                            "reason": "Originalmonat geprüft",
+                            "idempotency_key": "mcp-coverage",
+                        }
+                    },
+                )
+                assert coverage["version"] == 1
+                denied_policy = await client.call_tool(
+                    "set_bank_automation_policy",
+                    {
+                        "request": {
+                            "company_id": company.id,
+                            "expected_version": 0,
+                            "enabled": False,
+                            "reason": "Adminrecht erforderlich",
+                            "idempotency_key": "policy-denied",
+                        }
+                    },
+                )
+                assert denied_policy.is_error
                 await call(
                     "confirm_payment_allocation",
                     {
@@ -498,6 +535,22 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                     },
                 )
                 assert denied.is_error
+
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + admin_token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                policy = await client.call_tool(
+                    "set_bank_automation_policy",
+                    {
+                        "request": {
+                            "company_id": company.id,
+                            "expected_version": 0,
+                            "enabled": False,
+                            "reason": "Explizit deaktiviert",
+                            "idempotency_key": "mcp-policy",
+                        }
+                    },
+                )
+                assert not policy.is_error
 
     asyncio.run(scenario())
     assert BankTransaction.objects.count() == 1

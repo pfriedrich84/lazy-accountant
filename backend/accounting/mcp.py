@@ -18,6 +18,8 @@ from .models import Job
 from .schemas import DocumentResult
 from .payment_schemas import (
     AllocationRequest,
+    BankCoverageRequest,
+    BankPolicyRequest,
     ReconcileRequest,
     ReverseAllocationRequest,
     RevokePartyRequest,
@@ -179,6 +181,40 @@ async def save_document_result(
 ) -> dict[str, Any]:
     """Vollständiges strukturiertes Ergebnis mit Ausgangsversion speichern. Unbekanntes null lassen; approve nur ohne Prüfpunkte."""
     return await call(ctx, services.save_result, result.model_dump(mode="json"), "agent:" + run_id)
+
+
+@server.tool()
+async def get_bank_automation_policy(company_id: int, ctx: Context) -> dict[str, Any]:
+    """Persistente Firmenpolicy mit Audit lesen. Sie autorisiert keine Überweisung."""
+    from .bank_state import get_policy
+
+    return await call(ctx, get_policy, company_id)
+
+
+@server.tool()
+async def set_bank_automation_policy(request: BankPolicyRequest, ctx: Context) -> dict[str, Any]:
+    """Admin konfiguriert konservative Rechnungsautomatik versioniert. Deaktivierung stoppt keine belegten Bankrückbuchungen."""
+    from .bank_state import set_policy
+
+    return await call(ctx, set_policy, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def get_bank_account_coverage(
+    company_id: int, period: str, ctx: Context, cursor: int = 0, limit: int = 50
+) -> dict[str, Any]:
+    """Kontoweisen Datenstand und Monatsabdeckung lesen. Buchungsdatum ist kein Vollständigkeitsbeweis. Bestätigte Monate nicht allein wegen unscharfer Grenzen erneut abfragen."""
+    from .bank_state import account_overview
+
+    return await call(ctx, account_overview, company_id, period, cursor, limit)
+
+
+@server.tool()
+async def set_bank_month_coverage(request: BankCoverageRequest, ctx: Context) -> dict[str, Any]:
+    """Bewusste Vollständigkeitserklärung oder konkreten Widerspruch für einen Kontomonat versioniert dokumentieren. Quellen prüfen; keine Zahlung erzeugen."""
+    from .bank_state import set_coverage
+
+    return await call(ctx, set_coverage, **request.model_dump(mode="json"))
 
 
 @server.tool()

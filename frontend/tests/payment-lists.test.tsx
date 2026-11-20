@@ -7,6 +7,7 @@ import { api } from "../app/api";
 
 const context = vi.hoisted(() => ({ companyId: 1 as number | null }));
 vi.mock("../app/routes/shell", () => ({ useApp: () => context }));
+vi.mock("../app/bank-controls", () => ({ BankControls: () => null }));
 vi.mock("../app/api", async (original) => ({
   ...(await original<typeof import("../app/api")>()),
   api: vi.fn(),

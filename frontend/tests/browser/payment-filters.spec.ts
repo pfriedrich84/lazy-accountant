@@ -19,8 +19,24 @@ test("Zahlungslisten filtern firmenweit über echte REST-Antworten", async ({
   const initial = page.waitForResponse((r) =>
     r.url().includes("/api/reconciliation/invoices/"),
   );
+  const policy = page.waitForResponse((r) =>
+    r.url().includes("/api/reconciliation/policy/"),
+  );
+  const accountState = page.waitForResponse((r) =>
+    r.url().includes("/api/reconciliation/accounts/"),
+  );
   await page.goto("/payments");
   expect((await initial).ok()).toBe(true);
+  expect((await (await policy).json()).rule_version).toBe(
+    "exact-reference-known-iban-v1",
+  );
+  expect(Array.isArray((await (await accountState).json()).items)).toBe(true);
+  await expect(
+    page.getByRole("heading", {
+      name: "Automatikpolicy der Firma",
+      exact: true,
+    }),
+  ).toBeVisible();
   await page
     .getByRole("combobox", { name: "Firmenweiter Filter", exact: true })
     .click();

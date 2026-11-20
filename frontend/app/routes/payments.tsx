@@ -20,6 +20,7 @@ import {
   type PaymentStatus,
 } from "../payments";
 import { useApp } from "./shell";
+import { BankControls } from "../bank-controls";
 
 type InvoiceStatus = PaymentStatus & {
   kind: string;
@@ -29,8 +30,19 @@ type InvoiceStatus = PaymentStatus & {
 };
 
 export default function Payments() {
-  const { companyId } = useApp();
-  return <PaymentLists key={companyId} companyId={companyId} />;
+  const { companyId, period } = useApp();
+  return (
+    <Stack spacing={2}>
+      {companyId && (
+        <BankControls
+          key={`${companyId}-${period}`}
+          companyId={companyId}
+          period={period}
+        />
+      )}
+      <PaymentLists key={companyId} companyId={companyId} />
+    </Stack>
+  );
 }
 
 function PaymentLists({ companyId }: { companyId: number | null }) {

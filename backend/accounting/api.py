@@ -178,6 +178,18 @@ class Reconciliation(APIView):
 
         actor = request_actor(request)
         p = request.query_params
+        if action == "policy":
+            from .bank_state import get_policy
+
+            return Response(get_policy(actor, int(p["company_id"])))
+        if action == "accounts":
+            from .bank_state import account_overview
+
+            return Response(
+                account_overview(
+                    actor, int(p["company_id"]), p.get("period"), p.get("cursor", 0), p.get("limit", 50)
+                )
+            )
         if action == "verified-parties":
             return Response(bank.list_verified_parties(actor, int(p["company_id"])))
         if action == "status":
@@ -216,8 +228,11 @@ class Reconciliation(APIView):
         from pydantic import ValidationError
 
         from . import reconciliation as bank
+        from .bank_state import set_coverage, set_policy
         from .payment_schemas import (
             AllocationRequest,
+            BankCoverageRequest,
+            BankPolicyRequest,
             ReconcileRequest,
             ReverseAllocationRequest,
             RevokePartyRequest,
@@ -225,6 +240,8 @@ class Reconciliation(APIView):
         )
 
         operations = {
+            "policy": (BankPolicyRequest, set_policy),
+            "coverage": (BankCoverageRequest, set_coverage),
             "normalize": (ReconcileRequest, bank.reconcile_document),
             "allocate": (AllocationRequest, bank.allocate),
             "reverse": (ReverseAllocationRequest, bank.reverse_allocation),

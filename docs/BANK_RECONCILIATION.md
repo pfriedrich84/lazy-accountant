@@ -53,6 +53,10 @@ Alle Operationen rufen denselben Service `accounting/reconciliation.py` auf. RES
 | GET `verified-parties/?company_id=…` | `list_verified_bank_parties` | read |
 | POST `verify-party/` | `verify_bank_party(request=…)` | admin |
 | POST `revoke-party/` | `revoke_bank_party(request=…)` | admin |
+| GET `policy/?company_id=…` | `get_bank_automation_policy` | read |
+| POST `policy/` | `set_bank_automation_policy(request=…)` | admin |
+| GET `accounts/?company_id=…&period=YYYY-MM` | `get_bank_account_coverage` | read |
+| POST `coverage/` | `set_bank_month_coverage(request=…)` | process |
 
 ### Firmenweite Listenfilter (Folgearbeit)
 
@@ -71,6 +75,22 @@ Optionale Parameter gelten identisch für REST und die genannten MCP-Werkzeuge; 
 Schreibschemas in `payment_schemas.py` verbieten unbekannte Felder. Ein beliebiger `paid=true`-Schalter existiert nicht. Normalisierung erhält `document_id`, `base_version`, `auto_confirm` (Default true) und `idempotency_key`. Zuordnung erhält `transaction_id`, `document_id`, `amount` als Dezimalstring, `bank_version`, `document_version`, `reason`, `idempotency_key`. Aufhebung erhält `allocation_id`, `bank_version`, `reason`, `idempotency_key`.
 
 Firmen-/Tokenrechte werden vor jedem Zugriff und auch vor Idempotenz-Replay geprüft. Schreibvorgänge sperren in der Reihenfolge Actor, Firma, Bankbewegung, Rechnung (bei Dokumentaktionen Actor, Firma, Dokument). Summen werden unter Sperre neu berechnet. Identischer Schlüssel/identischer Payload hat einen Effekt; abweichender Payload gibt 409. Nicht authentisierte oder fremde Zugriffe erhalten keine Bankdaten. UI- oder Agentenrechte autorisieren niemals Zahlungen oder Mahnungen.
+
+### Persistente Automatikpolicy und kontoweise Monatsabdeckung
+
+`policy` speichert die Firmenpräferenz für neue konservative Rechnungszuordnungen. Ohne explizite Konfiguration bleibt die bereits vom Nutzer freigegebene Automatik aktiv (`version=0`, `persisted=false`); Konfigurationen sind dauerhaft versioniert und auditiert. `enabled=false` hat Vorrang vor `auto_confirm=true` am einzelnen Abgleich. Umgekehrt deaktiviert `auto_confirm=false` die Rechnungsautomatik für diesen Aufruf auch bei aktiver Firmenpolicy. Das Ändern der Policy startet **keinen** Abgleich und erzeugt keine Zahlung. Eindeutig belegte Bankrückbuchungen berichtigen vorhandene Deckung weiterhin unabhängig davon. Die Policy ist keine Überweisungs-, Versand- oder neue Gegenparteifreigabe.
+
+Policy-Schreiben braucht `company_id`, `expected_version` (0 für noch keine Konfiguration), `enabled`, Begründung und Idempotenzschlüssel; nur Admin. Abgleichergebnisse enthalten den dabei geltenden Policystand und `auto_confirm_effective`. Historische idempotente Retries liefern den damaligen Effekt, nicht eine neue Ausführung mit inzwischen geänderter Policy.
+
+`accounts` trennt je Bankkonto den **beobachteten Datenstand** (letztes gebuchtes Bewegungsdatum und Anzahl/pending über alle vorhandenen Monate) von der **Abdeckung des gewählten Monats**. Ein Datum allein beweist keine vollständige Monatsabdeckung. Ohne Auszug/Erklärung bleibt sie ungeklärt. Konten sind mit `cursor`/`limit` (1–100) paginiert; maximal 100 Monatsquellen und die letzten 100 Auditereignisse je Erklärung werden angezeigt. Eine größere Quellenmenge wird sichtbar als unvollständige Übersicht/Prüfbedarf gemeldet, nie still als sicher vollständig ausgegeben. Gesperrte normalisierte Quellen sperren auch die ausgegebenen Bankaggregate.
+
+Die bereits bestätigte Produktvorgabe bleibt erhalten: **geprüfte Monatsauszüge gelten für ihren zugeordneten Monat als vollständig**, ohne erneute Pflichtbestätigung nur wegen unscharfer Monatsgrenzen oder Erstellung vor Monatsende. Die Projektion nennt diese Grundlage ausdrücklich `accepted_monthly_statement_convention`, nicht einen bankseitig bewiesenen lückenlosen Zeitraum. Parserdaten, Dokumente und alte Pakete werden dafür nicht umgeschrieben. Konkrete offene Punkte, Seitenlücken, Quellwidersprüche oder Sicherheitssperren bleiben sichtbarer Prüfbedarf.
+
+Zusätzlich können Nutzer mit `process` eine quellenbezogene Monatsvollständigkeit ausdrücklich dokumentieren oder den Monat als `disputed`/`unknown` markieren. Schreiben braucht Firma/Konto/Monat, `expected_version`, Zustand, Begründung, Idempotenzschlüssel und konkrete `document_ids` samt `document_versions`. Eine Bestätigung braucht mindestens einen aktiven, geprüften, sauberen CAMT-/PDF-Auszug desselben Firmenkontos und Monats. Sie hebt **keine** Unsicherheiten einer PDF-Buchungsextraktion auf und macht keine Zahlung bankbelegt. Fehlende exakte Kalendergrenzen sind allein kein Ablehnungsgrund. Veraltete Quellen-/Erklärungsversion => 409; fremde Quellen/Konten => 404; konkrete offene Quellenwidersprüche verhindern Bestätigung.
+
+Erklärungen bleiben mit Benutzer, Begründung, Quellenversionen/-prüfsummen und Historie erhalten. Eine spätere Quellsperre, ein Ausschluss oder Firmen-/Konten-/Monatswechsel macht die **wirksame** bestätigte Abdeckung strittig, ohne die frühere Erklärung zu löschen. Eine reine Namensrevision oder unscharfe Datumsgrenze invalidiert sie nicht. Wiederherstellung erzeugt keine Zahlung. Der bewusste Zustand `unknown`/`disputed` überschreibt die Monatskonvention, bis ein neuer begründeter Auftrag erfolgt. Die UI zeigt diese Zustände und bietet versionierte Aktionen statt blinder Wiederholung nach Versionskonflikt.
+
+Sperrreihenfolge ist Actor → Firma → Quellendokumente; REST/MCP/UI verwenden denselben Dienst `bank_state.py`. Kontrollereignisse und idempotente Receipts werden atomar mit der Policy/Erklärung gespeichert. Historische Zahlungs-/Paket-Snapshots und Originale bleiben unverändert. Migration `0010` vereinigt die beiden bereits vorhandenen, inhaltsgleichen `0009`-Mergepfade aus Draft und main; `0011` ergänzt nur neue Kontrolltabellen. Keine bestehenden Erklärungen oder Zahlungen werden erfunden.
 
 ### Sicherheitssperren nach #18
 
@@ -102,7 +122,7 @@ Dieser Stand erzeugt **keinen zweiten fachlichen Invoice-Stamm**: `PaymentAlloca
 - Bankkennungen nach echten anonymisierten Bankfixtures qualifizieren. Der aktuelle konservative Bankreferenzschlüssel kann bei geänderten Darstellungen einen Konflikt melden; keine automatische heuristische Zusammenführung. Fehlende Identitäten benötigen noch einen expliziten Auflösungsworkflow.
 - Teilrückbuchungen, mehrfach verwendete Originalreferenzen und banklayoutspezifische Rückgabeinformationen außerhalb der konservativ unterstützten `RvslInd`-/`RtrInf`-/Bankreferenz-/TxId-Regel bleiben manuell zu prüfen. Kein automatischer anteiliger Saldoausgleich aufgrund Betrag oder Rechnungsnummer.
 - Vollständiger fachlicher Storno-/Gutschrift-/Erstattungsworkflow, manuelle Nichtbankzahlungen und deren spätere Bankbestätigung gemeinsam mit #9. Dieser CAMT-Stand deckt normale ER/AR und bankbasierte Teil-/Sammelzahlung ab, keine komplette Buchhaltung.
-- Kontoweise Abdeckungs-/Vollständigkeitsanzeige und persistente Freigabepolicy je Firma. Kein erneutes Grundsatznachfragen allein wegen unscharfer Monatsgrenzen; aber auch keine automatische Behauptung vollständiger Abdeckung.
+- Weitergehende Auszugs-/Saldo-/Seitenlückenqualifikation anhand realer anonymisierter Bankbeispiele. Kontoweiser beobachteter Datenstand, Monatskonvention, explizite quellenbezogene Erklärungen und persistente Firmen-Automatikpolicy sind im Folge-Draft enthalten; kein Nachweis bankseitig lückenloser Abdeckung und kein Ersatz für reale Abnahme.
 - Spezifischer finanzieller Korrekturworkflow statt derzeitiger 409-Sperre. Die Sicherheitsintegration mit Dokumentausschluss/Restore aus #7 ist enthalten; referenzierte Historie kann noch nicht fachlich umgebucht werden.
 - Weitergehende Such-/Auswertungsoptimierung bei großen Beständen, breitere UI-/Browserabnahme und Lasttests. Firmenweite serverseitige Grundfilter sind in der Folgearbeit enthalten.
 - PostgreSQL-Parallelitätstest ist vorhanden, wird unter SQLite ausdrücklich übersprungen. Er muss vor Merge gegen PostgreSQL erfolgreich laufen. SQLite-Ergebnisse beweisen keine Row-Lock-Sicherheit.

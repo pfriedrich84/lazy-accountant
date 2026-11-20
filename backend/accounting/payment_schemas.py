@@ -2,13 +2,32 @@
 
 from decimal import Decimal
 from uuid import UUID
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 class BankRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     idempotency_key: str = Field(min_length=1, max_length=120)
+
+
+class BankPolicyRequest(BankRequest):
+    company_id: int = Field(ge=1, strict=True)
+    expected_version: int = Field(ge=0, strict=True)
+    enabled: bool = Field(strict=True)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class BankCoverageRequest(BankRequest):
+    company_id: int = Field(ge=1, strict=True)
+    account_id: int = Field(ge=1, strict=True)
+    period: str = Field(pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+    expected_version: int = Field(ge=0, strict=True)
+    state: Literal["confirmed", "disputed", "unknown"]
+    document_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    document_versions: dict[UUID, StrictInt] = Field(default_factory=dict, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class ReconcileRequest(BankRequest):

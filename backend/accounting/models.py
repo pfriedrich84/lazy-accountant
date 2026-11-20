@@ -432,6 +432,56 @@ class PaymentAllocation(models.Model):
         constraints = [models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_allocation")]
 
 
+class BankAutomationPolicy(models.Model):
+    """Company preference; never authorizes transfers or bypasses matching guards."""
+
+    company = models.OneToOneField(Company, on_delete=models.PROTECT)
+    enabled = models.BooleanField(default=True)
+    version = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class BankMonthCoverage(models.Model):
+    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+    period = models.CharField(max_length=7)
+    state = models.CharField(
+        max_length=12,
+        choices=[("confirmed", "Bestätigt"), ("disputed", "Widerspruch"), ("unknown", "Ungeklärt")],
+    )
+    version = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["account", "period"], name="unique_bank_month_coverage")
+        ]
+
+
+class BankCoverageSource(models.Model):
+    coverage = models.ForeignKey(BankMonthCoverage, on_delete=models.PROTECT, related_name="sources")
+    document = models.ForeignKey(Document, on_delete=models.PROTECT)
+    document_version = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+
+    # Evidence for the current declaration; earlier declarations remain in BankControlEvent.
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["coverage", "document"], name="unique_bank_coverage_source")
+        ]
+
+
+class BankControlEvent(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.PROTECT)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    operation = models.CharField(max_length=30)
+    account = models.ForeignKey(Account, null=True, on_delete=models.PROTECT)
+    period = models.CharField(max_length=7, blank=True)
+    version = models.PositiveIntegerField()
+    reason = models.CharField(max_length=1000)
+    payload = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class IdempotencyRecord(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     operation = models.CharField(max_length=100)

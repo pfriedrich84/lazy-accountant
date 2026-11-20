@@ -6,5 +6,5 @@ def test_migration_graph_has_no_conflicting_leaves():
 
     assert loader.detect_conflicts() == {}
     assert loader.graph.leaf_nodes("accounting") == [
-        ("accounting", "0009_merge_document_security"),
+        ("accounting", "0011_bankautomationpolicy_bankcontrolevent_and_more"),
     ]

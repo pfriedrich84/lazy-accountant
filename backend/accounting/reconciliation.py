@@ -800,6 +800,8 @@ def reconcile_document(actor, document_id, base_version, idempotency_key, auto_c
         if replay is not None:
             return replay
         doc = services.get_document(actor, document_id, "process", lock=True)
+        if doc.company_id != initial.company_id:
+            raise DomainError("Firmenzuordnung inzwischen geändert. Neu laden.", 409)
         if doc.version != base_version:
             raise DomainError("Veraltete Dokumentversion.", 409)
         if (
@@ -885,8 +887,13 @@ def reconcile_document(actor, document_id, base_version, idempotency_key, auto_c
             ids.append(tx.id)
         # Bank cancellations invalidate old evidence even when new invoice auto-matching is disabled.
         applied_reversals = _apply_bank_reversals(actor, doc.company_id)
+        # A request may disable matching, but can never bypass a disabled company policy.
+        from .bank_state import policy_data
+
+        policy = policy_data(doc.company_id)
+        effective_auto_confirm = auto_confirm and policy["enabled"]
         # After normalizing the entire file, matching sees all source conflicts and cancellations first.
-        if auto_confirm:
+        if effective_auto_confirm:
             for tx in BankTransaction.objects.filter(id__in=ids).order_by("id"):
                 options = _candidate_rows(tx)
                 if len(options) == 1 and not options[0]["reasons"]:
@@ -902,6 +909,8 @@ def reconcile_document(actor, document_id, base_version, idempotency_key, auto_c
                 "transaction_ids": list(dict.fromkeys(str(i) for i in ids)),
                 "confirmed": confirmed,
                 "applied_reversals": applied_reversals,
+                "auto_confirm_effective": effective_auto_confirm,
+                "automation_policy": policy,
             },
         )
 
