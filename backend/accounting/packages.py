@@ -241,7 +241,7 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         "recipients": company.recipients,
         "allow_open_issues": company.allow_open_issues,
         "documents": included,
-        "payment_schema_version": 1,
+        "payment_schema_version": 2,
         "payments": payments,
         "payment_changes": payment_changes,
         "excluded": excluded,
@@ -354,7 +354,7 @@ def build_archive(snapshot, package_id, version):
             files[f"{base}/Zahlungsstand.xlsx"] = payment_stream.getvalue()
             files[f"{base}/Zahlungsstand.json"] = json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": snapshot.get("payment_schema_version", 1),
                     "payments": payments,
                     "changed_ids": [
                         p["document_id"]

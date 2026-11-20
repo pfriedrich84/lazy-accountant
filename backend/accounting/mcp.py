@@ -18,6 +18,8 @@ from .models import Job
 from .schemas import DocumentResult
 from .payment_schemas import (
     AllocationRequest,
+    FXPreviewRequest,
+    FXConfirmRequest,
     BankCoverageRequest,
     BankPolicyRequest,
     BankIdentityMergeRequest,
@@ -347,6 +349,30 @@ async def confirm_payment_allocation(request: AllocationRequest, ctx: Context) -
     from .reconciliation import allocate
 
     return await call(ctx, allocate, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def get_fx_payment_evidence(transaction_id: str, ctx: Context) -> dict[str, Any]:
+    """Original-Kartenbetrag, belegten Kurs, separate Gebühren und konkrete CAMT-/Textquellen lesen."""
+    from .fx import get_evidence
+
+    return await call(ctx, get_evidence, transaction_id)
+
+
+@server.tool()
+async def preview_fx_payment_allocation(request: FXPreviewRequest, ctx: Context) -> dict[str, Any]:
+    """FX-Teil-/Sammelzuordnung in beiden Währungen vorschauen; keine Zahlung auslösen."""
+    from .fx import preview
+
+    return await call(ctx, preview, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def confirm_fx_payment_allocation(request: FXConfirmRequest, ctx: Context) -> dict[str, Any]:
+    """Geprüfte FX-Vorschau explizit, versioniert, atomar und idempotent bestätigen; Gebühren sind keine Rechnungszahlung."""
+    from .fx import confirm
+
+    return await call(ctx, confirm, **request.model_dump(mode="json"))
 
 
 @server.tool()

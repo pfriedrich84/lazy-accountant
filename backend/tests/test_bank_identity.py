@@ -144,6 +144,7 @@ def test_financially_referenced_observation_even_reversed_remains_protected(acto
         transaction_id=duplicate_id,
         document_id=inv["id"],
         amount="40",
+        bank_amount="40",
         decision="manual_confirmed",
         actor_id=actor.user_id,
         reason="Synthetischer Legacy-Konflikt",
