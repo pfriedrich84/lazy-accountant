@@ -39,7 +39,12 @@ def test_business_exclude_restore_never_clears_security_gate(actor, companies, s
         with pytest.raises(DomainError):
             storage.read_original(doc)
         preview = packages.package_preview(actor, companies[0].id, ["2026-10"])
-        assert not preview["documents"] and preview["security_blocked"]
+        assert not preview["documents"]
+        if excluded:
+            assert not preview["security_blocked"]
+            assert identifier in {row["document"]["id"] for row in preview["intentional_exclusions"]}
+        else:
+            assert preview["security_blocked"]
         assert not doc.filed_path
 
 
