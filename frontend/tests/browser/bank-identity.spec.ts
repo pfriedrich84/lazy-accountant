@@ -53,6 +53,16 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
     });
     expect(upload.status()).toBe(201);
     const id = (await upload.json()).results[0].document.id;
+    // Upload is quarantined until the real asynchronous scanner/worker completes.
+    // Do not bypass or race that security gate when preparing approved originals.
+    await expect
+      .poll(
+        async () =>
+          (await (await page.request.get(`/api/documents/${id}/`)).json())
+            .security_status,
+        { timeout: 30_000 },
+      )
+      .toBe("clean");
     const doc = await (await page.request.get(`/api/documents/${id}/`)).json();
     const approved = await page.request.put(`/api/documents/${id}/`, {
       headers,
@@ -67,7 +77,7 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
         approve: true,
       },
     });
-    expect(approved.ok()).toBe(true);
+    expect(approved.ok(), await approved.text()).toBe(true);
     const value = await approved.json();
     const normalized = await page.request.post(
       "/api/reconciliation/normalize/",
@@ -81,7 +91,7 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
         },
       },
     );
-    expect(normalized.ok()).toBe(true);
+    expect(normalized.ok(), await normalized.text()).toBe(true);
     ids.push((await normalized.json()).transaction_ids[0]);
   }
   await page.goto("/payments");
