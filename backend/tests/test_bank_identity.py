@@ -329,6 +329,87 @@ def test_postgres_identity_merge_racing_other_writers_is_atomic(actor, companies
     assert not PaymentAllocation.objects.filter(transaction_id=duplicate_id).exists()
 
 
+def test_complete_rest_upload_review_normalize_merge_dispute_flow(client, companies):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from accounting.models import Account
+
+    company = companies[0]
+    account = Account.objects.get(company=company, kind="bank")
+    ids = []
+    for reference in ["", "SYNTH-REST-BANK"]:
+        uploaded = client.post(
+            "/api/documents/",
+            {
+                "company_id": company.id,
+                "files": SimpleUploadedFile("synthetic.xml", camt(reference=reference, txid="SYNTH-REST-TX")),
+            },
+            format="multipart",
+        )
+        assert uploaded.status_code == 201
+        doc = client.get(f"/api/documents/{uploaded.json()['results'][0]['document']['id']}/").json()
+        assert doc["security_status"] == "clean"
+        approved = client.put(
+            f"/api/documents/{doc['id']}/",
+            {
+                "document_id": doc["id"],
+                "base_version": doc["version"],
+                "company_id": company.id,
+                "kind": "bank_camt",
+                "period": "2026-10",
+                "account_id": account.id,
+                "metadata": {**doc["metadata"], "period_start": "2026-10-01", "period_end": "2026-10-31"},
+                "approve": True,
+            },
+            format="json",
+        )
+        assert approved.status_code == 200, approved.json()
+        normalized = client.post(
+            "/api/reconciliation/normalize/",
+            {
+                "document_id": doc["id"],
+                "base_version": approved.json()["version"],
+                "auto_confirm": False,
+                "idempotency_key": str(uuid4()),
+            },
+            format="json",
+        )
+        assert normalized.status_code == 200, normalized.json()
+        ids.append(normalized.json()["transaction_ids"][0])
+    preview = client.get(
+        "/api/reconciliation/identity-preview/", {"duplicate_id": ids[0], "canonical_id": ids[1]}
+    ).json()
+    assert preview["can_merge"], preview
+    payload = {
+        k: preview[k]
+        for k in [
+            "duplicate_id",
+            "canonical_id",
+            "duplicate_version",
+            "canonical_version",
+            "document_versions",
+        ]
+    }
+    merged = client.post(
+        "/api/reconciliation/identity-merge/",
+        {**payload, "reason": "Originale geprüft", "idempotency_key": "rest-merge"},
+        format="json",
+    )
+    assert merged.status_code == 200, merged.json()
+    disputed = client.post(
+        "/api/reconciliation/identity-dispute/",
+        {
+            "duplicate_id": ids[0],
+            "duplicate_version": merged.json()["duplicate_version"],
+            "canonical_version": merged.json()["canonical_version"],
+            "reason": "Bezug bestritten",
+            "idempotency_key": "rest-dispute",
+        },
+        format="json",
+    )
+    assert disputed.status_code == 200, disputed.json()
+    assert disputed.json()["payment_effect"] == "none" and not PaymentAllocation.objects.exists()
+
+
 def test_rest_mcp_contract_scopes_and_strict_schema(client, actor, companies):
     _, _, duplicate_id, canonical_id = pair(actor, companies[0])
     preview = client.get(

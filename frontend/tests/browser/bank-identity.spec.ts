@@ -73,7 +73,11 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
         kind: "bank_camt",
         period: "2026-10",
         account_id: account.id,
-        metadata: doc.metadata,
+        metadata: {
+          ...doc.metadata,
+          period_start: "2026-10-01",
+          period_end: "2026-10-31",
+        },
         approve: true,
       },
     });
