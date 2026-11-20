@@ -125,6 +125,49 @@ def test_bank_and_securities_examples():
     assert naming.proposal(income)["source"] == "fallback"  # No facts inferred from filenames.
 
 
+@pytest.mark.parametrize("kind", ["bank_pdf", "bank_camt", "security_pdf"])
+@pytest.mark.parametrize("short_name", [None, "", "   "])
+def test_bank_name_uses_issuer_without_requiring_abbreviation(kind, short_name):
+    account = Account(id=1, company_id=1, name="Settlement account", kind="bank")
+    doc = synthetic(
+        kind,
+        account=account,
+        issuer="Synthetic Financial Institution",
+        bank_short_name=short_name,
+        period_end="2026-04-29",
+        date="2026-04-30",
+        subtype="Ausschüttung",
+        number="123",
+    )
+    before = dict(doc.metadata)
+    result = naming.proposal(doc)
+    assert result["source"] == "generated"
+    assert result["warning"] == ""
+    assert "Synthetic Financial Institution" in result["name"]
+    assert doc.metadata == before  # Naming neither edits facts nor verifies bank parties.
+    doc.metadata["evidence"] = {"issuer": {"uncertain": True}}
+    assert naming.proposal(doc)["source"] == "fallback"
+    doc.metadata["issuer"] = None
+    doc.original_name = "Synthetic Financial Institution.xml"
+    assert naming.proposal(doc)["source"] == "fallback"
+
+
+def test_explicit_bank_short_name_takes_precedence_without_uncertainty_bypass():
+    doc = synthetic(
+        "bank_camt",
+        account=Account(id=1, company_id=1, name="Settlement account", kind="bank"),
+        issuer="Synthetic Financial Institution",
+        bank_short_name="Synthetic FI",
+        period_end="2026-04-29",
+    )
+    assert "Synthetic FI Settlement account" in naming.proposal(doc)["name"]
+    doc.metadata["evidence"] = {"bank_short_name": {"uncertain": True}}
+    assert naming.proposal(doc)["source"] == "fallback"
+    # Even an uncertain, empty short name must not silently fall through to issuer.
+    doc.metadata["bank_short_name"] = ""
+    assert naming.proposal(doc)["source"] == "fallback"
+
+
 def test_roles_receipts_credits_and_confirmed_partner():
     m = dict(
         date="2026-09-25",

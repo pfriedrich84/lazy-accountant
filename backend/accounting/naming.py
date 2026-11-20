@@ -77,6 +77,10 @@ def proposal(doc):
     needs_account = kind in {"bank_pdf", "bank_camt"}
     if kind in {"bank_pdf", "bank_camt", "security_pdf"}:
         partner = field("bank_short_name")
+        if not component(partner):
+            # The extracted issuer is sufficient; a separate abbreviation is optional.
+            # Keep both selected fields in `used` so uncertainty cannot be bypassed.
+            partner = field("issuer")
         if kind in {"bank_pdf", "bank_camt"}:
             date = field("period_end")
         else:
