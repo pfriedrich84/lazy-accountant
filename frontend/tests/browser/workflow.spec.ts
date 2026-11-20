@@ -109,9 +109,12 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
     .getByLabel("Dokumentdateien")
     .setInputFiles(path.resolve("../var/samples/eingang.pdf"));
   await expect(page.getByText(/1 Datei\(en\) übernommen/)).toBeVisible();
+  await expect(page.getByText(/^Original:/)).toHaveCount(0);
   await page
     .getByRole("row")
-    .filter({ hasText: "Original: eingang.pdf" })
+    .filter({
+      has: page.getByRole("link", { name: /^eingang-[a-f0-9]+\.pdf$/ }),
+    })
     .getByRole("link")
     .click();
   await expect(
@@ -233,7 +236,13 @@ test("Zwei vollständige Firmenmonate mit allen Dokumentarten über die Oberflä
     for (const [index, [name, kind]] of files.entries()) {
       await page
         .getByRole("row")
-        .filter({ has: page.getByText(`Original: ${name}`, { exact: true }) })
+        .filter({
+          has: page.getByRole("link", {
+            name: new RegExp(
+              `^${name.slice(0, name.lastIndexOf("."))}-[a-f0-9]+\\.${name.slice(name.lastIndexOf(".") + 1)}$`,
+            ),
+          }),
+        })
         .getByRole("link")
         .click();
       await expect(
