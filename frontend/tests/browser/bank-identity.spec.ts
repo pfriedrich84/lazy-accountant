@@ -20,17 +20,34 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
   const csrf = (await (await page.request.get("/api/auth/csrf/")).json())
     .csrfToken;
   const headers = { "X-CSRFToken": csrf };
-  const company = (await (await page.request.get("/api/companies/")).json())[0];
-  const assignments = await (
-    await page.request.get(`/api/companies/${company.id}/`)
-  ).json();
-  const account = assignments.accounts.find(
-    (item: { kind: string }) => item.kind === "bank",
-  );
   const unique = `IDENTITY-${info.project.name}-${Date.now()}`.replace(
     /[^A-Za-z0-9-]/g,
     "-",
   );
+  // Keep the shared MCP/restore smoke company and its frozen report untouched.
+  const created = await page.request.post("/api/companies/", {
+    headers,
+    data: {
+      name: `Identity Browser ${unique}`,
+      folder: unique,
+      recipients: ["kanzlei@example.test"],
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const company = await created.json();
+  const createdAccount = await page.request.post(
+    `/api/companies/${company.id}/accounts/`,
+    {
+      headers,
+      data: {
+        name: "Synthetic Identity Bank",
+        kind: "bank",
+        identifier: "AT611904300234573201",
+      },
+    },
+  );
+  expect(createdAccount.status(), await createdAccount.text()).toBe(201);
+  const account = await createdAccount.json();
   const ids: string[] = [];
   for (const reference of ["", `BANK-${unique}`]) {
     // Synthetic CAMT originals, deliberately equal TxId/counteraccount/facts.
@@ -99,6 +116,8 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
     ids.push((await normalized.json()).transaction_ids[0]);
   }
   await page.goto("/payments");
+  await page.getByRole("combobox", { name: "Firma", exact: true }).click();
+  await page.getByRole("option", { name: company.name, exact: true }).click();
   await page.getByRole("combobox", { name: "Ansicht", exact: true }).click();
   await page
     .getByRole("option", {
@@ -154,11 +173,9 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
     .click();
   expect((await (await disputed).json()).payment_effect).toBe("none");
   await expect(
-    page
-      .getByRole("alert")
-      .filter({
-        hasText: `Identitätszusammenführung bestritten · kanonische Bewegung ${ids[1]}`,
-      }),
+    page.getByRole("alert").filter({
+      hasText: `Identitätszusammenführung bestritten · kanonische Bewegung ${ids[1]}`,
+    }),
   ).toBeVisible();
   const movements = await (
     await page.request.get(
