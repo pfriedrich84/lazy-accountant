@@ -14,6 +14,8 @@ import {
   MenuItem,
   Paper,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -29,6 +31,20 @@ import { useApp } from "./shell";
 import { PaymentPanel } from "../payments";
 import { DocumentExclusion } from "../document-exclusion";
 import { DocumentName } from "../document-names";
+
+const expandIcon = (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    aria-hidden="true"
+  >
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
 
 function Editor({ doc }: { doc: Document }) {
   const { companies, period: activePeriod } = useApp();
@@ -55,6 +71,36 @@ function Editor({ doc }: { doc: Document }) {
   const [duplicateOf, setDuplicateOf] = useState(doc.duplicate_of || "");
   const [page, setPage] = useState(1);
   const [notice, setNotice] = useState("");
+  const [mobileView, setMobileView] = useState("data");
+  const [zoom, setZoom] = useState(100);
+  const [previewError, setPreviewError] = useState(false);
+  const dirty =
+    JSON.stringify({
+      companyId,
+      kind,
+      period,
+      accountId,
+      categoryId,
+      metadata,
+      taxes,
+      evidence,
+      openPoints,
+      related,
+      duplicateOf,
+    }) !==
+    JSON.stringify({
+      companyId: doc.company_id || "",
+      kind: doc.kind || "",
+      period: doc.period || "",
+      accountId: doc.account_id || "",
+      categoryId: doc.category_id || "",
+      metadata: doc.metadata,
+      taxes: JSON.stringify(doc.metadata.taxes || [], null, 2),
+      evidence: JSON.stringify(doc.metadata.evidence || {}, null, 2),
+      openPoints: (doc.metadata.open_points || []).join("\n"),
+      related: (doc.related_ids || []).join("\n"),
+      duplicateOf: doc.duplicate_of || "",
+    });
   const assignments = useQuery({
     queryKey: ["assignments", companyId],
     queryFn: () => api<Assignments>(`companies/${companyId}/`),
@@ -128,30 +174,57 @@ function Editor({ doc }: { doc: Document }) {
       }
       slotProps={type === "date" ? { inputLabel: { shrink: true } } : undefined}
       fullWidth
+      size="small"
     />
   );
   const bank = ["bank_pdf", "bank_camt", "security_pdf"].includes(kind);
   return (
-    <>
-      <Heading
-        title={doc.effective_name}
-        subtitle={`Revision ${doc.version} · Original SHA256 ${doc.sha256.slice(0, 16)}…`}
-        actions={
-          <Stack
-            direction="row"
+    <Box
+      className="document-workspace"
+      sx={{ pb: { xs: 20, sm: 12 }, minWidth: 0 }}
+    >
+      <Button component={Link} to="/documents" size="small" sx={{ mb: 1 }}>
+        Zur Liste
+      </Button>
+      <Stack direction="row" sx={{ alignItems: "start", gap: 2, mb: 3 }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography
+            component="h1"
+            variant="h5"
             sx={{
-              gap: 1,
+              overflowWrap: "anywhere",
+              fontWeight: 700,
+              fontSize: { xs: "1.125rem", sm: "1.5rem" },
+              lineHeight: 1.35,
             }}
           >
-            <Status status={doc.status} />
-            <Button component={Link} to="/documents">
-              Zur Liste
-            </Button>
-          </Stack>
-        }
-      />
-      <DocumentExclusion doc={doc} />
-      <DocumentName doc={doc} />
+            {doc.effective_name}
+          </Typography>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ mt: 0.75, display: { xs: "none", sm: "block" } }}
+          >
+            Original prüfen, Angaben ergänzen und für die Übergabe freigeben.
+          </Typography>
+        </Box>
+        <Status status={doc.status} />
+      </Stack>
+      {doc.is_excluded && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <strong>Als Nichtbeleg ausgeschlossen</strong>: {doc.exclusion_reason}
+          <Typography variant="body2">
+            Die Bearbeitung ist gesperrt. Unter „Dokument verwalten“ lässt sich
+            der Beleg wiederherstellen.
+          </Typography>
+          <Typography variant="caption">
+            {doc.excluded_at &&
+              new Date(doc.excluded_at).toLocaleString("de-AT")}{" "}
+            · Bearbeiter {doc.excluded_by_id ?? "unbekannt"}. Original und
+            Herkunft bleiben erhalten.
+          </Typography>
+        </Alert>
+      )}
       <ErrorAlert error={save.error || assignments.error} />
       {doc.filing_status === "pending" && (
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -174,18 +247,56 @@ function Editor({ doc }: { doc: Document }) {
           Aktuellen Stand neu laden (ungespeicherte Eingaben vorher sichern)
         </Button>
       )}
+      <Tabs
+        value={mobileView}
+        onChange={(_, value: string) => setMobileView(value)}
+        aria-label="Dokumentansicht"
+        sx={{
+          display: { xs: "flex", lg: "none" },
+          mb: 2,
+          borderBottom: 1,
+          borderColor: "divider",
+        }}
+      >
+        <Tab
+          value="data"
+          label="Prüfdaten"
+          id="document-data-tab"
+          aria-controls="document-data"
+        />
+        <Tab
+          value="original"
+          label="Original"
+          id="document-original-tab"
+          aria-controls="document-original"
+        />
+      </Tabs>
       <Box
         sx={{
           display: "grid",
           gridTemplateColumns: {
             xs: "1fr",
-            lg: "minmax(0,1fr) minmax(420px,1fr)",
+            lg: "minmax(0,1.15fr) minmax(380px,1fr)",
           },
           gap: 3,
           alignItems: "start",
         }}
       >
-        <Paper sx={{ p: 2, position: { lg: "sticky" }, top: { lg: 100 } }}>
+        <Paper
+          id="document-original"
+          aria-label="Originalvorschau"
+          component="section"
+          sx={{
+            p: 2,
+            minWidth: 0,
+            display: {
+              xs: mobileView === "original" ? "block" : "none",
+              lg: "block",
+            },
+            position: { lg: "sticky" },
+            top: { lg: 96 },
+          }}
+        >
           <Stack
             direction="row"
             sx={{
@@ -200,7 +311,7 @@ function Editor({ doc }: { doc: Document }) {
                 fontWeight: 700,
               }}
             >
-              Originalvorschau
+              Original
             </Typography>
             <Button
               component="a"
@@ -211,6 +322,38 @@ function Editor({ doc }: { doc: Document }) {
               Original öffnen
             </Button>
           </Stack>
+          {doc.media_type !== "application/xml" && (
+            <Stack
+              direction="row"
+              sx={{ gap: 1, alignItems: "center", mb: 1, flexWrap: "wrap" }}
+            >
+              <Button
+                size="small"
+                aria-label="Verkleinern"
+                disabled={zoom <= 100}
+                onClick={() => setZoom((z) => z - 25)}
+              >
+                −
+              </Button>
+              <Typography
+                variant="body2"
+                sx={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {zoom}%
+              </Typography>
+              <Button
+                size="small"
+                aria-label="Vergrößern"
+                disabled={zoom >= 250}
+                onClick={() => setZoom((z) => z + 25)}
+              >
+                +
+              </Button>
+              <Button size="small" onClick={() => setZoom(100)}>
+                Einpassen
+              </Button>
+            </Stack>
+          )}
           {doc.media_type === "application/xml" ? (
             <Box
               component="pre"
@@ -229,16 +372,29 @@ function Editor({ doc }: { doc: Document }) {
               sx={{
                 bgcolor: "#e9eeec",
                 p: 1,
-                maxHeight: "72vh",
+                maxHeight: "calc(100dvh - 310px)",
+                minHeight: 240,
                 overflow: "auto",
                 borderRadius: 1,
               }}
             >
-              <img
-                className="preview-page"
-                src={`/api/documents/${doc.id}/page/?page=${page}`}
-                alt={`Originalseite ${page} von ${doc.original_name}`}
-              />
+              {previewError && (
+                <Alert severity="warning">
+                  Die Vorschau konnte nicht geladen werden. Bitte das Original
+                  öffnen.
+                </Alert>
+              )}
+              <Box sx={{ width: `${zoom}%`, minWidth: "100%" }}>
+                <img
+                  key={page}
+                  className="preview-page"
+                  src={`/api/documents/${doc.id}/page/?page=${page}`}
+                  alt={`Originalseite ${page} von ${doc.original_name}`}
+                  onError={() => setPreviewError(true)}
+                  onLoad={() => setPreviewError(false)}
+                  style={{ width: "100%" }}
+                />
+              </Box>
             </Box>
           )}
           {doc.media_type === "application/pdf" && (
@@ -287,19 +443,55 @@ function Editor({ doc }: { doc: Document }) {
             </AccordionDetails>
           </Accordion>
         </Paper>
-        <Stack spacing={2}>
-          {!doc.is_excluded && <PaymentPanel doc={doc} />}
+        <Stack
+          id="document-data"
+          component="section"
+          aria-label="Prüfdaten"
+          spacing={2}
+          sx={{
+            minWidth: 0,
+            display: {
+              xs: mobileView === "data" ? "flex" : "none",
+              lg: "flex",
+            },
+          }}
+        >
           <Paper
             component="fieldset"
             disabled={!!doc.is_excluded}
-            sx={{ p: 3, m: 0, minWidth: 0, border: 0 }}
+            sx={{
+              p: { xs: 2, sm: 3 },
+              m: 0,
+              minWidth: 0,
+              border: 0,
+              "& .MuiTextField-root": { minWidth: 0 },
+              "& .MuiInputBase-root": { fontSize: "0.9rem" },
+            }}
           >
-            <Typography variant="h6" sx={{ mb: 2 }}>
-              Zuordnung & Prüfung
-            </Typography>
+            <Stack
+              direction="row"
+              sx={{
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: 2,
+                mb: 2,
+              }}
+            >
+              <Typography variant="h6" component="h2">
+                Zuordnung & Prüfung
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Revision {doc.version}
+              </Typography>
+            </Stack>
             {doc.issues.length > 0 && (
               <Alert severity="warning" sx={{ mb: 2 }}>
-                <strong>{doc.issues.length} offene Prüfpunkte</strong>
+                <strong>
+                  {doc.issues.length}{" "}
+                  {doc.issues.length === 1
+                    ? "offener Prüfpunkt"
+                    : "offene Prüfpunkte"}
+                </strong>
                 <ul style={{ marginBottom: 0, paddingLeft: 18 }}>
                   {doc.issues.map((i, n) => (
                     <li key={n}>{i}</li>
@@ -308,6 +500,9 @@ function Editor({ doc }: { doc: Document }) {
               </Alert>
             )}
             <Stack spacing={2}>
+              <Typography component="h3" variant="subtitle2">
+                Zuordnung
+              </Typography>
               <TextField
                 select
                 label="Firma"
@@ -371,6 +566,7 @@ function Editor({ doc }: { doc: Document }) {
                   fullWidth
                 />
                 <Button
+                  sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
                   onClick={() =>
                     setPeriod(
                       metadata.date?.slice(0, 7) ||
@@ -471,14 +667,13 @@ function Editor({ doc }: { doc: Document }) {
                   )}
                 </>
               )}
-              {field(
-                "subtype",
-                "Unterart (z. B. Zahlungsbeleg oder Depotaufstellung)",
-              )}
-              {field(
-                "confirmed_partner_name",
-                "Bestätigte Geschäftspartnerbezeichnung (optional)",
-              )}
+              <Typography
+                component="h3"
+                variant="subtitle2"
+                sx={{ pt: 2, borderTop: 1, borderColor: "divider" }}
+              >
+                Belegdaten
+              </Typography>
               <Stack
                 direction={{ xs: "column", sm: "row" }}
                 sx={{
@@ -506,10 +701,17 @@ function Editor({ doc }: { doc: Document }) {
                 {field("service_date", "Leistungsdatum", "date")}
                 {field("due_date", "Fälligkeit", "date")}
               </Stack>
+              <Typography
+                component="h3"
+                variant="subtitle2"
+                sx={{ pt: 2, borderTop: 1, borderColor: "divider" }}
+              >
+                Beträge
+              </Typography>
               <Box
                 sx={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(2,1fr)",
+                  gridTemplateColumns: "repeat(2,minmax(0,1fr))",
                   gap: 2,
                 }}
               >
@@ -518,6 +720,13 @@ function Editor({ doc }: { doc: Document }) {
                 {field("gross", "Brutto (z. B. 120.00)")}
                 {field("currency", "Währung (ISO, z. B. EUR)")}
               </Box>
+              <Typography
+                component="h3"
+                variant="subtitle2"
+                sx={{ pt: 2, borderTop: 1, borderColor: "divider" }}
+              >
+                Ergänzungen
+              </Typography>
               <TextField
                 label="Notiz"
                 multiline
@@ -534,12 +743,28 @@ function Editor({ doc }: { doc: Document }) {
                 value={openPoints}
                 onChange={(e) => setOpenPoints(e.target.value)}
               />
-              <Accordion>
-                <AccordionSummary>
-                  Steueraufteilung, Belegstellen & Verknüpfungen
+              <Accordion
+                disableGutters
+                elevation={0}
+                sx={{
+                  border: 1,
+                  borderColor: "divider",
+                  "&:before": { display: "none" },
+                }}
+              >
+                <AccordionSummary expandIcon={expandIcon}>
+                  Weitere Angaben & Verknüpfungen
                 </AccordionSummary>
                 <AccordionDetails>
                   <Stack spacing={2}>
+                    {field(
+                      "subtype",
+                      "Unterart (z. B. Zahlungsbeleg oder Depotaufstellung)",
+                    )}
+                    {field(
+                      "confirmed_partner_name",
+                      "Bestätigte Geschäftspartnerbezeichnung (optional)",
+                    )}
                     <TextField
                       label="Steueraufteilungen (JSON: rate, net, tax als Strings)"
                       multiline
@@ -589,28 +814,6 @@ function Editor({ doc }: { doc: Document }) {
                   ))}
                 </Alert>
               )}
-              <Stack
-                direction="row"
-                sx={{
-                  gap: 2,
-                  flexWrap: "wrap",
-                }}
-              >
-                <Button
-                  variant="outlined"
-                  disabled={save.isPending}
-                  onClick={() => save.mutate(false)}
-                >
-                  Zwischenstand speichern
-                </Button>
-                <Button
-                  variant="contained"
-                  disabled={save.isPending}
-                  onClick={() => save.mutate(true)}
-                >
-                  Prüfen & freigeben
-                </Button>
-              </Stack>
               <Typography
                 variant="caption"
                 sx={{
@@ -623,62 +826,181 @@ function Editor({ doc }: { doc: Document }) {
               </Typography>
             </Stack>
           </Paper>
-          <Paper sx={{ p: 3 }}>
-            <Typography
-              sx={{
-                fontWeight: 700,
-              }}
-            >
-              Ablage & Nachvollziehbarkeit
-            </Typography>
-            <Typography className="file-path" sx={{ mt: 1 }}>
-              {doc.filed_path}
-            </Typography>
-            <Typography
-              variant="caption"
-              sx={{ display: "block", mt: 1, overflowWrap: "anywhere" }}
-            >
-              SHA256: {doc.sha256}
-            </Typography>
-            <Stack
-              direction="row"
-              sx={{
-                gap: 1,
-                flexWrap: "wrap",
-                mt: 2,
-              }}
-            >
-              {doc.revisions?.map((r) => (
-                <Chip
-                  key={r.version}
-                  size="small"
-                  label={`v${r.version} · ${r.source} · Bearbeiter ${r.actor_id} · ${new Date(r.created_at).toLocaleString("de-AT")}${r.reason ? ` · ${r.reason}` : ""}`}
-                  sx={{
-                    height: "auto",
-                    "& .MuiChip-label": { whiteSpace: "normal", py: 0.5 },
-                  }}
-                />
-              ))}
-            </Stack>
-            <Accordion sx={{ mt: 2 }}>
-              <AccordionSummary>Importherkunft</AccordionSummary>
-              <AccordionDetails>
-                <Box
-                  component="pre"
-                  sx={{
-                    whiteSpace: "pre-wrap",
-                    overflowWrap: "anywhere",
-                    fontSize: ".75rem",
-                  }}
-                >
-                  {JSON.stringify(doc.sources, null, 2)}
-                </Box>
-              </AccordionDetails>
-            </Accordion>
-          </Paper>
+          {!doc.is_excluded &&
+            ["incoming_invoice", "outgoing_invoice", "bank_camt"].includes(
+              doc.kind,
+            ) &&
+            !!doc.company_id && (
+              <Accordion
+                disableGutters
+                slotProps={{ transition: { mountOnEnter: true } }}
+              >
+                <AccordionSummary expandIcon={expandIcon}>
+                  <Typography
+                    component="span"
+                    variant="subtitle1"
+                    sx={{ fontWeight: 600 }}
+                  >
+                    Bankabgleich & Zahlungsstand
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <PaymentPanel doc={doc} embedded />
+                </AccordionDetails>
+              </Accordion>
+            )}
+          <Accordion disableGutters>
+            <AccordionSummary expandIcon={expandIcon}>
+              <Typography
+                component="span"
+                variant="subtitle1"
+                sx={{ fontWeight: 600 }}
+              >
+                Dokument verwalten
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              {dirty && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Bitte zuerst die Prüfdaten speichern. Namensänderungen und
+                  Ausschluss laden die Dokumentrevision neu.
+                </Alert>
+              )}
+              <DocumentName
+                doc={doc}
+                disabled={dirty || save.isPending}
+                embedded
+              />
+              <DocumentExclusion
+                doc={doc}
+                disabled={dirty || save.isPending}
+                showStatus={false}
+              />
+            </AccordionDetails>
+          </Accordion>
+          <Accordion disableGutters>
+            <AccordionSummary expandIcon={expandIcon}>
+              <Typography
+                component="span"
+                variant="subtitle1"
+                sx={{ fontWeight: 600 }}
+              >
+                Ablage & Nachvollziehbarkeit
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Typography className="file-path" sx={{ mt: 1 }}>
+                {doc.filed_path}
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{ display: "block", mt: 1, overflowWrap: "anywhere" }}
+              >
+                SHA256: {doc.sha256}
+              </Typography>
+              <Stack
+                direction="row"
+                sx={{
+                  gap: 1,
+                  flexWrap: "wrap",
+                  mt: 2,
+                }}
+              >
+                {doc.revisions?.map((r) => (
+                  <Chip
+                    key={r.version}
+                    size="small"
+                    label={`v${r.version} · ${r.source} · Bearbeiter ${r.actor_id} · ${new Date(r.created_at).toLocaleString("de-AT")}${r.reason ? ` · ${r.reason}` : ""}`}
+                    sx={{
+                      height: "auto",
+                      "& .MuiChip-label": { whiteSpace: "normal", py: 0.5 },
+                    }}
+                  />
+                ))}
+              </Stack>
+              <Accordion sx={{ mt: 2 }}>
+                <AccordionSummary>Importherkunft</AccordionSummary>
+                <AccordionDetails>
+                  <Box
+                    component="pre"
+                    sx={{
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                      fontSize: ".75rem",
+                    }}
+                  >
+                    {JSON.stringify(doc.sources, null, 2)}
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            </AccordionDetails>
+          </Accordion>
         </Stack>
       </Box>
-    </>
+      <Paper
+        component="section"
+        aria-label="Prüfung abschließen"
+        square
+        sx={{
+          position: "fixed",
+          bottom: 0,
+          left: { xs: 0, md: 240 },
+          right: 0,
+          zIndex: (theme) => theme.zIndex.appBar - 1,
+          borderTop: 1,
+          borderColor: "divider",
+          px: { xs: 2, sm: 3, lg: 4 },
+          pt: 1.5,
+          pb: "max(12px, env(safe-area-inset-bottom))",
+          boxShadow: "0 -4px 20px #102c240a",
+        }}
+      >
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          sx={{
+            maxWidth: 1636,
+            mx: "auto",
+            gap: 1,
+            justifyContent: "space-between",
+            alignItems: { sm: "center" },
+          }}
+        >
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            role="status"
+            aria-live="polite"
+          >
+            {save.isPending
+              ? "Wird gespeichert …"
+              : doc.is_excluded
+                ? "Beleg ausgeschlossen"
+                : dirty
+                  ? "Ungespeicherte Änderungen"
+                  : "Keine ungespeicherten Änderungen"}
+          </Typography>
+          <Stack
+            direction="row"
+            sx={{ gap: 1, "& > button": { flex: { xs: 1, sm: "initial" } } }}
+          >
+            <Button
+              variant="outlined"
+              disabled={save.isPending || !!doc.is_excluded}
+              onClick={() => save.mutate(false)}
+            >
+              Zwischenstand speichern
+            </Button>
+            <Button
+              variant="contained"
+              disabled={save.isPending || !!doc.is_excluded}
+              onClick={() => save.mutate(true)}
+            >
+              Prüfen & freigeben
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
+    </Box>
   );
 }
 

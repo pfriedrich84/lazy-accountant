@@ -1,4 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function manage(page: Page) {
+  const section = page.getByRole("button", {
+    name: "Dokument verwalten",
+    exact: true,
+  });
+  if ((await section.getAttribute("aria-expanded")) !== "true")
+    await section.click();
+}
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -37,6 +46,7 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
     }),
   });
   await signatureRow.getByRole("link").click();
+  await manage(page);
   await expect(
     page.getByText(`Originalname: ${filename}`, { exact: true }),
   ).toBeVisible();
@@ -68,9 +78,13 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
   await expect(
     page.getByRole("button", { name: "Prüfen & freigeben" }),
   ).toBeDisabled();
+  const originalTab = page.getByRole("tab", { name: "Original", exact: true });
+  if (await originalTab.isVisible()) await originalTab.click();
   await expect(
     page.getByRole("link", { name: "Original öffnen" }),
   ).toBeVisible();
+  const dataTab = page.getByRole("tab", { name: "Prüfdaten", exact: true });
+  if (await dataTab.isVisible()) await dataTab.click();
   await expect(
     page.getByText(/Visuell geprüfte Signaturgrafik/).first(),
   ).toContainText("<b>untrusted</b>");
@@ -89,6 +103,7 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
     .click();
   await signatureRow.getByRole("link").click();
   await expect(page).toHaveURL(docUrl);
+  await manage(page);
   await page
     .getByRole("button", { name: "Wiederherstellen", exact: true })
     .click();
@@ -96,6 +111,10 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
   await dialog
     .getByRole("button", { name: "Wiederherstellen", exact: true })
     .click();
+  await expect(
+    page.getByText("Als Nichtbeleg ausgeschlossen", { exact: true }),
+  ).toHaveCount(0);
+  await manage(page);
   await expect(
     page.getByRole("button", {
       name: "Als Nichtbeleg ausschließen",
@@ -108,6 +127,9 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
   await expect(
     page.getByText("Als Nichtbeleg ausgeschlossen", { exact: true }),
   ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Ablage & Nachvollziehbarkeit", exact: true })
+    .click();
   await expect(page.getByText(/v3 · restore/)).toContainText(
     "Wiederherstellung prüfen",
   );
