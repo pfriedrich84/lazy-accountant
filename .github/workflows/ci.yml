@@ -1,10 +1,16 @@
 name: Checks and full Compose smoke
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+
+# Keep only the latest run for each PR or branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
@@ -35,6 +41,7 @@ jobs:
       - run: uv run python backend/manage.py makemigrations --check --dry-run
       - run: uv run pytest -q
       - name: Real ClamAV with production scan limits and encrypted/limit alerts
+        if: github.event_name != 'pull_request'
         run: |
           docker run -d --name clamav-integration --memory=3g --cpus=2 \
             -p 127.0.0.1:13310:3310 -e FRESHCLAM_CHECKS=24 \
@@ -49,7 +56,7 @@ jobs:
           done
           [ "$ready" = 1 ] || { docker logs clamav-integration; exit 1; }
           CLAMAV_HOST=127.0.0.1 CLAMAV_PORT=13310 RUN_CLAMAV_TESTS=1 uv run pytest -q -m clamav
-      - if: always()
+      - if: always() && github.event_name != 'pull_request'
         run: |
           docker logs --tail=80 clamav-integration 2>/dev/null || true
           docker rm -f clamav-integration 2>/dev/null || true
@@ -69,7 +76,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck && npm test && npm run build
 
+  # Full end-to-end coverage after merge and on explicit manual runs.
   compose:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
