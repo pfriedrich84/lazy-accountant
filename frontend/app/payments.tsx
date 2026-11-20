@@ -146,7 +146,13 @@ export function BankCandidates({ movement }: { movement: BankMovement }) {
   );
 }
 
-export function PaymentPanel({ doc }: { doc: Document }) {
+export function PaymentPanel({
+  doc,
+  embedded = false,
+}: {
+  doc: Document;
+  embedded?: boolean;
+}) {
   const cache = useQueryClient();
   const invoice = ["incoming_invoice", "outgoing_invoice"].includes(doc.kind);
   const bank = doc.kind === "bank_camt";
@@ -225,9 +231,11 @@ export function PaymentPanel({ doc }: { doc: Document }) {
   if ((!invoice && !bank) || !doc.company_id) return null;
   const canProcess = permissions.data?.permissions.process;
   return (
-    <Paper sx={{ p: 3 }}>
+    <Paper elevation={embedded ? 0 : undefined} sx={{ p: embedded ? 0 : 3 }}>
       <Stack spacing={2}>
-        <Typography variant="h6">Bankabgleich & Zahlungsstand</Typography>
+        {!embedded && (
+          <Typography variant="h6">Bankabgleich & Zahlungsstand</Typography>
+        )}
         <ErrorAlert
           error={
             action.error ||

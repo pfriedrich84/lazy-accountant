@@ -23,7 +23,15 @@ import {
 } from "./api";
 import { ErrorAlert } from "./components";
 
-export function DocumentExclusion({ doc }: { doc: Document }) {
+export function DocumentExclusion({
+  doc,
+  disabled = false,
+  showStatus = true,
+}: {
+  doc: Document;
+  disabled?: boolean;
+  showStatus?: boolean;
+}) {
   const cache = useQueryClient();
   const [reason, setReason] = useState("");
   const [command, setCommand] = useState<{
@@ -63,7 +71,7 @@ export function DocumentExclusion({ doc }: { doc: Document }) {
     [400, 403, 404, 409].includes(change.error.status);
   return (
     <Stack spacing={2} sx={{ mb: 2 }}>
-      {doc.is_excluded && (
+      {doc.is_excluded && showStatus && (
         <Alert severity="info">
           <strong>Als Nichtbeleg ausgeschlossen</strong>: {doc.exclusion_reason}
           <Typography variant="body2">
@@ -88,7 +96,7 @@ export function DocumentExclusion({ doc }: { doc: Document }) {
       <Box>
         <Button
           variant="outlined"
-          disabled={!canProcess}
+          disabled={disabled || !canProcess}
           onClick={() => {
             setReason("");
             change.reset();

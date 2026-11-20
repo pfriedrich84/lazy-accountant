@@ -15,7 +15,15 @@ import {
 import { api, post, type Document } from "./api";
 import { ErrorAlert } from "./components";
 
-export function DocumentName({ doc }: { doc: Document }) {
+export function DocumentName({
+  doc,
+  disabled = false,
+  embedded = false,
+}: {
+  doc: Document;
+  disabled?: boolean;
+  embedded?: boolean;
+}) {
   const cache = useQueryClient();
   const [name, setName] = useState(doc.handover_name || doc.effective_name);
   const save = useMutation({
@@ -30,7 +38,10 @@ export function DocumentName({ doc }: { doc: Document }) {
     },
   });
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
+    <Paper
+      elevation={embedded ? 0 : undefined}
+      sx={{ p: embedded ? 0 : 2, mb: 2, overflowWrap: "anywhere" }}
+    >
       <Stack spacing={1}>
         <Typography variant="h6">Übergabename</Typography>
         <Typography>Originalname: {doc.original_name}</Typography>
@@ -61,10 +72,16 @@ export function DocumentName({ doc }: { doc: Document }) {
           speichern; nach einer Namensänderung wird der Editor neu geladen.
         </Typography>
         <Stack direction="row" spacing={1}>
-          <Button disabled={save.isPending} onClick={() => save.mutate(name)}>
+          <Button
+            disabled={disabled || save.isPending}
+            onClick={() => save.mutate(name)}
+          >
             Namen manuell setzen
           </Button>
-          <Button disabled={save.isPending} onClick={() => save.mutate(null)}>
+          <Button
+            disabled={disabled || save.isPending}
+            onClick={() => save.mutate(null)}
+          >
             Generator übernehmen
           </Button>
         </Stack>

@@ -21,6 +21,22 @@ async function navigate(page: Page, title: string) {
     .click();
 }
 
+async function inspectOriginal(page: Page, name: string) {
+  await page
+    .getByRole("button", { name: "Dokument verwalten", exact: true })
+    .click();
+  await expect(
+    page.getByText(`Originalname: ${name}`, { exact: true }),
+  ).toBeVisible();
+  const originalTab = page.getByRole("tab", { name: "Original", exact: true });
+  if (await originalTab.isVisible()) await originalTab.click();
+  await expect(page.getByRole("link", { name: "Original öffnen" })).toBeVisible(
+    { timeout: 90_000 },
+  );
+  const dataTab = page.getByRole("tab", { name: "Prüfdaten", exact: true });
+  if (await dataTab.isVisible()) await dataTab.click();
+}
+
 async function login(page: Page) {
   await page.goto("/");
   expect(await page.evaluate(() => typeof window.crypto.randomUUID)).toBe(
@@ -117,15 +133,10 @@ test("Firma anlegen → PDF hochladen → prüfen → Paket herunterladen", asyn
     })
     .getByRole("link")
     .click();
-  await expect(
-    page.getByText("Originalname: eingang.pdf", { exact: true }),
-  ).toBeVisible();
+  await inspectOriginal(page, "eingang.pdf");
   await expect(
     page.getByRole("heading", { name: /^eingang-[a-f0-9]+\.pdf$/ }),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Original öffnen" })).toBeVisible(
-    { timeout: 90_000 },
-  );
   const documentCompany = page
     .getByRole("main")
     .getByLabel("Firma", { exact: true });
@@ -245,12 +256,7 @@ test("Zwei vollständige Firmenmonate mit allen Dokumentarten über die Oberflä
         })
         .getByRole("link")
         .click();
-      await expect(
-        page.getByText(`Originalname: ${name}`, { exact: true }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("link", { name: "Original öffnen" }),
-      ).toBeVisible({ timeout: 90_000 });
+      await inspectOriginal(page, name);
       await page.getByLabel("Dokumentart", { exact: true }).click();
       await page.getByRole("option", { name: kind, exact: true }).click();
       await page
@@ -276,7 +282,7 @@ test("Zwei vollständige Firmenmonate mit allen Dokumentarten über die Oberflä
         if (index === 5) {
           await page
             .getByRole("button", {
-              name: "Steueraufteilung, Belegstellen & Verknüpfungen",
+              name: "Weitere Angaben & Verknüpfungen",
             })
             .click();
           await page
