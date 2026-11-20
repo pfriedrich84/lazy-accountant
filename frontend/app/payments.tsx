@@ -20,6 +20,20 @@ import {
 import { ErrorAlert } from "./components";
 
 export interface BankMovement {
+  merged_into_id?: string | null;
+  canonical_version?: number;
+  bank_reference?: string;
+  references?: Record<string, string>;
+  identity_review_points?: string[];
+  identity_resolution?: {
+    id: number;
+    actor_id: number;
+    reason: string;
+    created_at: string;
+    disputed_at: string | null;
+    dispute_reason: string;
+  } | null;
+  review_reasons?: string[];
   id: string;
   version: number;
   amount: string;
@@ -312,7 +326,8 @@ export function PaymentPanel({ doc }: { doc: Document }) {
             >
               <MenuItem value="">Bitte wählen</MenuItem>
               {movements.data?.items.map((t) => (
-                <MenuItem key={t.id} value={t.id}>
+                <MenuItem key={t.id} value={t.id} disabled={!!t.merged_into_id}>
+                  {t.merged_into_id ? "Zusammengeführt · " : ""}
                   {t.direction} · {t.available} {t.currency} · {t.party_name} ·{" "}
                   {t.remittance.slice(0, 60)}
                 </MenuItem>
@@ -343,7 +358,7 @@ export function PaymentPanel({ doc }: { doc: Document }) {
                 <Typography>
                   Gebucht: {tx.booked ? "ja" : "nein"} · {tx.issues.join("; ")}
                 </Typography>
-                <BankCandidates movement={tx} />
+                {!tx.merged_into_id && <BankCandidates movement={tx} />}
               </>
             )}
             <TextField
@@ -360,6 +375,7 @@ export function PaymentPanel({ doc }: { doc: Document }) {
               disabled={
                 !canProcess ||
                 !tx ||
+                !!tx.merged_into_id ||
                 !amount ||
                 !reason.trim() ||
                 action.isPending

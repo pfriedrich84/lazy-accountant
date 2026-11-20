@@ -178,6 +178,26 @@ class Reconciliation(APIView):
 
         actor = request_actor(request)
         p = request.query_params
+        if action in {"identity-preview", "identity-candidates", "identity-history"}:
+            from . import bank_identity
+
+            if action == "identity-preview":
+                return Response(bank_identity.preview(actor, p.get("duplicate_id"), p.get("canonical_id")))
+            if action == "identity-candidates":
+                return Response(bank_identity.candidates(actor, p.get("duplicate_id")))
+            return Response(bank_identity.history(actor, p.get("transaction_id")))
+        if action == "policy":
+            from .bank_state import get_policy
+
+            return Response(get_policy(actor, int(p["company_id"])))
+        if action == "accounts":
+            from .bank_state import account_overview
+
+            return Response(
+                account_overview(
+                    actor, int(p["company_id"]), p.get("period"), p.get("cursor", 0), p.get("limit", 50)
+                )
+            )
         if action == "verified-parties":
             return Response(bank.list_verified_parties(actor, int(p["company_id"])))
         if action == "status":
@@ -186,12 +206,28 @@ class Reconciliation(APIView):
             return Response(bank.candidates(actor, p["transaction_id"]))
         if action == "transactions":
             return Response(
-                bank.list_transactions(actor, int(p["company_id"]), p.get("cursor", 0), p.get("limit", 50))
+                bank.list_transactions(
+                    actor,
+                    int(p["company_id"]),
+                    p.get("cursor", 0),
+                    p.get("limit", 50),
+                    state=p.get("state", "all"),
+                    account_id=p.get("account_id"),
+                    direction=p.get("direction"),
+                    search=p.get("search", ""),
+                )
             )
         if action == "invoices":
             return Response(
                 bank.list_invoice_statuses(
-                    actor, int(p["company_id"]), p.get("cursor", 0), p.get("limit", 50)
+                    actor,
+                    int(p["company_id"]),
+                    p.get("cursor", 0),
+                    p.get("limit", 50),
+                    state=p.get("state", "all"),
+                    kind=p.get("kind"),
+                    search=p.get("search", ""),
+                    as_of=p.get("as_of"),
                 )
             )
         raise DomainError("Operation nicht gefunden.", 404)
@@ -200,8 +236,14 @@ class Reconciliation(APIView):
         from pydantic import ValidationError
 
         from . import reconciliation as bank
+        from .bank_state import set_coverage, set_policy
+        from .bank_identity import merge as merge_identity, dispute as dispute_identity
         from .payment_schemas import (
             AllocationRequest,
+            BankIdentityMergeRequest,
+            BankIdentityDisputeRequest,
+            BankCoverageRequest,
+            BankPolicyRequest,
             ReconcileRequest,
             ReverseAllocationRequest,
             RevokePartyRequest,
@@ -209,6 +251,10 @@ class Reconciliation(APIView):
         )
 
         operations = {
+            "identity-merge": (BankIdentityMergeRequest, merge_identity),
+            "identity-dispute": (BankIdentityDisputeRequest, dispute_identity),
+            "policy": (BankPolicyRequest, set_policy),
+            "coverage": (BankCoverageRequest, set_coverage),
             "normalize": (ReconcileRequest, bank.reconcile_document),
             "allocate": (AllocationRequest, bank.allocate),
             "reverse": (ReverseAllocationRequest, bank.reverse_allocation),
@@ -222,7 +268,7 @@ class Reconciliation(APIView):
             payload = schema.model_validate(request.data).model_dump(mode="json")
         except ValidationError as exc:
             raise DomainError(
-                "Ungültiger Zahlungsauftrag.", details=exc.errors(include_context=False)
+                "Ungültiger Zahlungsauftrag.", details=exc.errors(include_context=False, include_input=False)
             ) from exc
         return Response(function(request_actor(request), **payload))
 

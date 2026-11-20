@@ -7,6 +7,8 @@ from defusedxml import ElementTree
 
 from .camt import SUPPORTED_NAMESPACES
 
+MISSING_IDENTITY = "Keine belastbare Bankkennung; Identität ungeklärt"
+
 
 def reconciliation_entries(data):
     root = ElementTree.fromstring(data, forbid_dtd=True, forbid_entities=True, forbid_external=True)
@@ -70,7 +72,7 @@ def reconciliation_entries(data):
                 reference = reference or (text(entry, "AcctSvcrRef") if not split else "")
                 if reference.upper() in {"", "NOTPROVIDED", "NONREF"}:
                     reference = ""
-                    issues.append("Keine belastbare Bankkennung; Identität ungeklärt")
+                    issues.append(MISSING_IDENTITY)
                 party = "Dbtr" if direction == "CRDT" else "Cdtr"
                 name = text(detail, f"RltdPties/{party}/Nm") if detail is not None else ""
                 iban = text(detail, f"RltdPties/{party}Acct/Id/IBAN") if detail is not None else ""

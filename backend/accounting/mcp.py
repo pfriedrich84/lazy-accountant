@@ -18,6 +18,10 @@ from .models import Job
 from .schemas import DocumentResult
 from .payment_schemas import (
     AllocationRequest,
+    BankCoverageRequest,
+    BankPolicyRequest,
+    BankIdentityMergeRequest,
+    BankIdentityDisputeRequest,
     ReconcileRequest,
     ReverseAllocationRequest,
     RevokePartyRequest,
@@ -182,6 +186,82 @@ async def save_document_result(
 
 
 @server.tool()
+async def get_bank_identity_candidates(duplicate_id: str, ctx: Context) -> dict[str, Any]:
+    """Belegbare Zielbewegungen für eine fehlende Bankkennung lesen. TxId/Gegenkonto/Originalbezug, nie Betrag oder EndToEndId allein. Keine Zahlung erzeugen."""
+    from .bank_identity import candidates
+
+    return await call(ctx, candidates, duplicate_id)
+
+
+@server.tool()
+async def preview_bank_identity_merge(duplicate_id: str, canonical_id: str, ctx: Context) -> dict[str, Any]:
+    """Firmengebundene Vorschau mit Bank-/Quellenversionen und Sperrgründen; keine Reservierung oder Zahlungsbestätigung."""
+    from .bank_identity import preview
+
+    return await call(ctx, preview, duplicate_id, canonical_id)
+
+
+@server.tool()
+async def merge_bank_transaction_identity(request: BankIdentityMergeRequest, ctx: Context) -> dict[str, Any]:
+    """Fehlende Bankkennung explizit auf belegte kanonische Bewegung auflösen, Originalbytes prüfen. Keine Quellen/Zahlungen verschieben; finanziell verwendete oder widersprüchliche Beobachtungen bleiben gesperrt."""
+    from .bank_identity import merge
+
+    return await call(ctx, merge, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def dispute_bank_transaction_identity(
+    request: BankIdentityDisputeRequest, ctx: Context
+) -> dict[str, Any]:
+    """Zusammenführung begründet beanstanden: Bankdeckung wird strittig, keine Zahlung löschen und keinen Betrag erneut freigeben. Vollständiger Korrekturworkflow bleibt separat."""
+    from .bank_identity import dispute
+
+    return await call(ctx, dispute, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def get_bank_identity_history(transaction_id: str, ctx: Context) -> dict[str, Any]:
+    """Identitätsentscheidungen mit Originalbezug/Audit lesen; Sicherheits- und Firmenrechte erhalten."""
+    from .bank_identity import history
+
+    return await call(ctx, history, transaction_id)
+
+
+@server.tool()
+async def get_bank_automation_policy(company_id: int, ctx: Context) -> dict[str, Any]:
+    """Persistente Firmenpolicy mit Audit lesen. Sie autorisiert keine Überweisung."""
+    from .bank_state import get_policy
+
+    return await call(ctx, get_policy, company_id)
+
+
+@server.tool()
+async def set_bank_automation_policy(request: BankPolicyRequest, ctx: Context) -> dict[str, Any]:
+    """Admin konfiguriert konservative Rechnungsautomatik versioniert. Deaktivierung stoppt keine belegten Bankrückbuchungen."""
+    from .bank_state import set_policy
+
+    return await call(ctx, set_policy, **request.model_dump(mode="json"))
+
+
+@server.tool()
+async def get_bank_account_coverage(
+    company_id: int, period: str, ctx: Context, cursor: int = 0, limit: int = 50
+) -> dict[str, Any]:
+    """Kontoweisen Datenstand und Monatsabdeckung lesen. Buchungsdatum ist kein Vollständigkeitsbeweis. Bestätigte Monate nicht allein wegen unscharfer Grenzen erneut abfragen."""
+    from .bank_state import account_overview
+
+    return await call(ctx, account_overview, company_id, period, cursor, limit)
+
+
+@server.tool()
+async def set_bank_month_coverage(request: BankCoverageRequest, ctx: Context) -> dict[str, Any]:
+    """Bewusste Vollständigkeitserklärung oder konkreten Widerspruch für einen Kontomonat versioniert dokumentieren. Quellen prüfen; keine Zahlung erzeugen."""
+    from .bank_state import set_coverage
+
+    return await call(ctx, set_coverage, **request.model_dump(mode="json"))
+
+
+@server.tool()
 async def reconcile_bank_document(request: ReconcileRequest, ctx: Context) -> dict[str, Any]:
     """Geprüftes CAMT abgleichen. Eindeutige Rechnungen bestätigen; gebuchte eindeutig referenzierte Vollrückbuchungen berichtigen Deckung auch bei auto_confirm=false. Unklare Bezüge nicht raten."""
     from .reconciliation import reconcile_document
@@ -191,22 +271,56 @@ async def reconcile_bank_document(request: ReconcileRequest, ctx: Context) -> di
 
 @server.tool()
 async def list_bank_transactions(
-    company_id: int, ctx: Context, cursor: int = 0, limit: int = 50
+    company_id: int,
+    ctx: Context,
+    cursor: int = 0,
+    limit: int = 50,
+    state: str = "all",
+    account_id: int | None = None,
+    direction: str | None = None,
+    search: str = "",
 ) -> dict[str, Any]:
-    """Bankbewegungen mit Quellen, verfügbaren Beträgen und Prüfpunkten paginiert lesen."""
+    """Firmenweit vor Pagination filtern: all/open/unallocated/review/pending/reversed; optional Konto, Richtung, Suchtext. review_reasons erklärt Prüffälle. Keine Zahlungsautorisierung."""
     from .reconciliation import list_transactions
 
-    return await call(ctx, list_transactions, company_id, cursor, limit)
+    return await call(
+        ctx,
+        list_transactions,
+        company_id,
+        cursor,
+        limit,
+        state=state,
+        account_id=account_id,
+        direction=direction,
+        search=search,
+    )
 
 
 @server.tool()
 async def list_invoice_payment_statuses(
-    company_id: int, ctx: Context, cursor: int = 0, limit: int = 50
+    company_id: int,
+    ctx: Context,
+    cursor: int = 0,
+    limit: int = 50,
+    state: str = "all",
+    kind: str | None = None,
+    search: str = "",
+    as_of: str | None = None,
 ) -> dict[str, Any]:
-    """Offene Posten und Zahlungsstatus für importierte ER/AR paginiert lesen; keine Mahnungen auslösen."""
+    """Firmenweite OP-Filter vor Pagination: all/open/overdue/unresolved/review/unmatched/paid/partially_paid; ER/AR, Suche, Stichtag. review_reasons erklärt Prüfbedarf. Keine Mahnungen."""
     from .reconciliation import list_invoice_statuses
 
-    return await call(ctx, list_invoice_statuses, company_id, cursor, limit)
+    return await call(
+        ctx,
+        list_invoice_statuses,
+        company_id,
+        cursor,
+        limit,
+        state=state,
+        kind=kind,
+        search=search,
+        as_of=as_of,
+    )
 
 
 @server.tool()

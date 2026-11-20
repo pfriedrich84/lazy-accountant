@@ -397,6 +397,7 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
     inv = invoice(actor, company)
     doc = statement(actor, company)
     token = issue_token(actor, "bank", [company.id], ["read", "process"])["token"]
+    admin_token = issue_token(actor, "bank-admin", [company.id], ["read", "admin"])["token"]
     readonly = issue_token(actor, "read", [company.id], ["read"])["token"]
 
     async def scenario():
@@ -424,6 +425,42 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                 rows = await call("list_bank_transactions", {"company_id": company.id})
                 tx = rows["items"][0]
                 assert tx["id"] == txid
+                policy = await call("get_bank_automation_policy", {"company_id": company.id})
+                assert policy["enabled"] and policy["version"] == 0
+                overview = await call(
+                    "get_bank_account_coverage", {"company_id": company.id, "period": "2026-10"}
+                )
+                assert overview["items"][0]["coverage"]["effective_state"] == "confirmed"
+                coverage = await call(
+                    "set_bank_month_coverage",
+                    {
+                        "request": {
+                            "company_id": company.id,
+                            "account_id": doc["account_id"],
+                            "period": "2026-10",
+                            "expected_version": 0,
+                            "state": "confirmed",
+                            "document_ids": [doc["id"]],
+                            "document_versions": {doc["id"]: doc["version"]},
+                            "reason": "Originalmonat geprüft",
+                            "idempotency_key": "mcp-coverage",
+                        }
+                    },
+                )
+                assert coverage["version"] == 1
+                denied_policy = await client.call_tool(
+                    "set_bank_automation_policy",
+                    {
+                        "request": {
+                            "company_id": company.id,
+                            "expected_version": 0,
+                            "enabled": False,
+                            "reason": "Adminrecht erforderlich",
+                            "idempotency_key": "policy-denied",
+                        }
+                    },
+                )
+                assert denied_policy.is_error
                 await call(
                     "confirm_payment_allocation",
                     {
@@ -442,6 +479,25 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                     "get_invoice_payment_status", {"document_id": inv["id"], "as_of": "2026-10-21"}
                 )
                 assert status["status"] == "partially_paid" and status["overdue"]
+                filtered = await call(
+                    "list_invoice_payment_statuses",
+                    {
+                        "company_id": company.id,
+                        "state": "overdue",
+                        "as_of": "2026-10-21",
+                        "search": "INV-001",
+                        "limit": 1,
+                    },
+                )
+                assert filtered["items"][0]["document_id"] == inv["id"]
+                assert filtered["as_of"] == "2026-10-21"
+                assert not (
+                    await call("list_bank_transactions", {"company_id": company.id, "state": "pending"})
+                )["items"]
+                invalid = await client.call_tool(
+                    "list_invoice_payment_statuses", {"company_id": company.id, "state": "invented"}
+                )
+                assert invalid.is_error and "400" in str(invalid)
                 assert status["allocations"][0]["evidence"]["document_version"] == inv["version"]
                 for source in (inv, doc):
                     denied = await client.call_tool(
@@ -479,6 +535,22 @@ def test_bank_reconciliation_over_real_mcp(mcp_url, actor, companies):
                     },
                 )
                 assert denied.is_error
+
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + admin_token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                policy = await client.call_tool(
+                    "set_bank_automation_policy",
+                    {
+                        "request": {
+                            "company_id": company.id,
+                            "expected_version": 0,
+                            "enabled": False,
+                            "reason": "Explizit deaktiviert",
+                            "idempotency_key": "mcp-policy",
+                        }
+                    },
+                )
+                assert not policy.is_error
 
     asyncio.run(scenario())
     assert BankTransaction.objects.count() == 1
@@ -554,3 +626,71 @@ def test_real_mcp_exclusion_restore_and_rest_share_contract(mcp_url, actor, comp
 
     asyncio.run(scenario())
     assert Document.objects.get(id=doc["id"]).revisions.count() == 3
+
+
+@pytest.mark.django_db(transaction=True)
+def test_identity_resolution_real_mcp_preserves_sources_and_scopes(mcp_url, actor, companies):
+    from test_bank_identity import pair
+    from accounting.models import BankIdentityResolution, BankTransactionSource
+
+    _, _, duplicate_id, canonical_id = pair(actor, companies[0])
+    token = issue_token(actor, "identity", [companies[0].id], ["read", "process"])["token"]
+    readonly = issue_token(actor, "identity-readonly", [companies[0].id], ["read"])["token"]
+
+    async def scenario():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+
+                async def call(name, arguments):
+                    response = await client.call_tool(name, arguments)
+                    assert not response.is_error, response
+                    value = response.structured_content
+                    return value["result"] if value and set(value) == {"result"} else value
+
+                candidates = await call("get_bank_identity_candidates", {"duplicate_id": duplicate_id})
+                assert candidates["items"][0]["canonical_id"] == canonical_id
+                preview = await call(
+                    "preview_bank_identity_merge",
+                    {"duplicate_id": duplicate_id, "canonical_id": canonical_id},
+                )
+                payload = {
+                    k: preview[k]
+                    for k in [
+                        "duplicate_id",
+                        "canonical_id",
+                        "duplicate_version",
+                        "canonical_version",
+                        "document_versions",
+                    ]
+                }
+                payload.update(reason="Originale explizit geprüft", idempotency_key="mcp-identity-merge")
+                async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + readonly}) as read_http:
+                    async with Client(
+                        streamable_http_client(mcp_url + "/mcp/", http_client=read_http)
+                    ) as read_client:
+                        assert (
+                            await read_client.call_tool(
+                                "merge_bank_transaction_identity", {"request": payload}
+                            )
+                        ).is_error
+                merged = await call("merge_bank_transaction_identity", {"request": payload})
+                assert await call("merge_bank_transaction_identity", {"request": payload}) == merged
+                assert merged["payment_effect"] == "none"
+                await call(
+                    "dispute_bank_transaction_identity",
+                    {
+                        "request": {
+                            "duplicate_id": duplicate_id,
+                            "duplicate_version": merged["duplicate_version"],
+                            "canonical_version": merged["canonical_version"],
+                            "reason": "Bezug nachträglich zur Prüfung",
+                            "idempotency_key": "mcp-identity-dispute",
+                        }
+                    },
+                )
+                history = await call("get_bank_identity_history", {"transaction_id": canonical_id})
+                assert len(history["items"]) == 2
+
+    asyncio.run(scenario())
+    assert BankIdentityResolution.objects.get().disputed_at
+    assert BankTransactionSource.objects.count() == 2
