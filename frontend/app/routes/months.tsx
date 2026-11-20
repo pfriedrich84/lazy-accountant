@@ -88,9 +88,6 @@ export default function Months() {
                         style={{ overflowWrap: "anywhere" }}
                       >
                         {d.effective_name}
-                        <Typography variant="caption" sx={{ display: "block" }}>
-                          Original: {d.original_name}
-                        </Typography>
                       </Link>
                       <Status status={d.status} />
                     </Stack>

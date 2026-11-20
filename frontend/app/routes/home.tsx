@@ -174,7 +174,7 @@ export default function Home() {
               >
                 <Box>
                   <Link to={`/documents/${d.id}`} style={{ fontWeight: 650 }}>
-                    {d.original_name}
+                    {d.effective_name}
                   </Link>
                   <Typography
                     variant="caption"
