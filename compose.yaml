@@ -2,7 +2,7 @@ name: lazy-accountant
 
 x-app: &app
   build: .
-  image: lazy-accountant:0.1.0
+  image: lazy-accountant:${APP_VERSION:-0.1.1}
   user: "1000:1000"
   environment: &environment
     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Run scripts/init-env.py first}
