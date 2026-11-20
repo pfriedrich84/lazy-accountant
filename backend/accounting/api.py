@@ -470,6 +470,7 @@ class Folders(APIView):
                 company_id,
                 request.query_params.get("period", ""),
                 request.query_params.get("cursor"),
+                status=request.query_params.get("status"),
             )
         )
 
