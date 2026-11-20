@@ -492,6 +492,37 @@ def test_explicit_full_bank_reversal_reopens_invoice(actor, companies, kind, dir
     assert PaymentAllocation.objects.count() == 1
 
 
+@pytest.mark.parametrize("kind,direction", [("outgoing_invoice", "CRDT"), ("incoming_invoice", "DBIT")])
+def test_partial_bank_return_has_same_history_in_detail_and_list(actor, companies, kind, direction):
+    inv = invoice(actor, companies[0], kind)
+    original_doc = statement(actor, companies[0], camt(amount="40.00", direction=direction))
+    normalize(actor, original_doc, auto=False)
+    assign(actor, BankTransaction.objects.get(), inv, "40.00")
+    as_of = "2026-10-21"
+    partial = bank.payment_status(actor, inv["id"], as_of)
+    assert partial["status"] == "partially_paid"
+    assert Decimal(partial["remaining"]) == 80
+
+    returned_doc = statement(
+        actor,
+        companies[0],
+        camt(amount="40.00", direction="DBIT" if direction == "CRDT" else "CRDT", reversal=True),
+    )
+    assert len(normalize(actor, returned_doc, auto=False)["applied_reversals"]) == 1
+
+    detail = bank.payment_status(actor, inv["id"], as_of)
+    listed = bank.list_invoice_statuses(actor, companies[0].id, as_of=as_of)["items"]
+    assert len(listed) == 1
+    assert {key: listed[0][key] for key in detail} == detail
+    assert detail["status"] == "unpaid"
+    assert Decimal(detail["remaining"]) == 120
+    allocation = detail["allocations"][0]
+    assert allocation["reversed_at"]
+    assert [s["document_id"] for s in allocation["bank_sources"]] == [original_doc["id"]]
+    assert [s["document_id"] for s in allocation["reversal_sources"]] == [returned_doc["id"]]
+    assert all(s["locator"] for s in allocation["bank_sources"] + allocation["reversal_sources"])
+
+
 @pytest.mark.parametrize("marker", ["reversal", "return_info"])
 def test_transaction_id_reference_can_prove_bank_return(actor, companies, marker):
     inv = invoice(actor, companies[0])

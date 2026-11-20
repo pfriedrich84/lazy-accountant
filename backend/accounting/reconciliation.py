@@ -102,21 +102,26 @@ def payment_status(actor, document_id, as_of=None):
     return status_for_document(doc, as_of)
 
 
+def _payment_history():
+    """Shared history query for individual documents and batched list prefetches."""
+    return (
+        PaymentAllocation.objects.select_related("transaction", "reversed_by_bank_transaction")
+        .prefetch_related(
+            "reversed_by_bank_transaction__sources__document",
+            "transaction__sources__document",
+            "reversed_by_bank_transaction__merged_duplicates__sources__document",
+            "transaction__merged_duplicates__sources__document",
+        )
+        .order_by("created_at", "id")
+    )
+
+
 def status_for_document(doc, as_of=None):
     _require_clean_document(doc)
     day = date.fromisoformat(as_of) if as_of else timezone.localdate()
     rows = getattr(doc, "_payment_history", None)
     if rows is None:
-        rows = list(
-            doc.payment_allocations.select_related("transaction", "reversed_by_bank_transaction")
-            .prefetch_related(
-                "reversed_by_bank_transaction__sources__document",
-                "transaction__sources__document",
-                "reversed_by_bank_transaction__merged_duplicates__sources__document",
-                "transaction__merged_duplicates__sources__document",
-            )
-            .order_by("created_at", "id")
-        )
+        rows = list(_payment_history().filter(document=doc))
     for allocation in rows:
         _require_clean_sources(allocation.transaction)
         if allocation.reversed_by_bank_transaction_id:
@@ -388,18 +393,8 @@ def list_invoice_statuses(
             | Q(metadata__issuer__icontains=search)
             | Q(metadata__recipient__icontains=search)
         )
-    history = (
-        PaymentAllocation.objects.select_related("transaction", "reversed_by_bank_transaction")
-        .prefetch_related(
-            "reversed_by_bank_transaction__sources__document",
-            "transaction__sources__document",
-            "reversed_by_bank_transaction__merged_duplicates__sources__document",
-            "transaction__merged_duplicates__sources__document",
-        )
-        .order_by("created_at", "id")
-    )
     qs = qs.prefetch_related(
-        Prefetch("payment_allocations", queryset=history, to_attr="_payment_history")
+        Prefetch("payment_allocations", queryset=_payment_history(), to_attr="_payment_history")
     ).order_by("id")
 
     def project(doc):
