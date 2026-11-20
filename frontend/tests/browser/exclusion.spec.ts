@@ -31,9 +31,11 @@ test("Signaturgrafik ausschließen, separat finden und ohne Freigabe wiederherst
   await page
     .getByLabel("Dokumentdateien")
     .setInputFiles({ name: filename, mimeType: "image/png", buffer: bytes });
-  const signatureRow = page
-    .getByRole("row")
-    .filter({ hasText: `Original: ${filename}` });
+  const signatureRow = page.getByRole("row").filter({
+    has: page.getByRole("link", {
+      name: new RegExp(`^${filename.slice(0, -4)}-[a-f0-9]+\\.png$`),
+    }),
+  });
   await signatureRow.getByRole("link").click();
   await expect(
     page.getByText(`Originalname: ${filename}`, { exact: true }),

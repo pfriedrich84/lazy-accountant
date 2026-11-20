@@ -305,9 +305,6 @@ export default function Documents() {
                       >
                         {d.effective_name}
                       </Link>
-                      <Typography variant="caption" sx={{ display: "block" }}>
-                        Original: {d.original_name}
-                      </Typography>
                       {d.name_warning && (
                         <Typography
                           variant="caption"
