@@ -1,4 +1,6 @@
 .git
+.pi
+.impeccable
 .env
 .env.*
 .venv

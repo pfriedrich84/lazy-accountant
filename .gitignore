@@ -17,3 +17,16 @@ var/
 *.sqlite3-*
 *.log
 backups/
+
+# Impeccable: keep shared configuration, not local runtime state or engine binaries.
+.pi/skills/impeccable/scripts/bin/
+.impeccable/*
+!.impeccable/config.json
+!.impeccable/design.json
+!.impeccable/surfaces/
+!.impeccable/critique/
+.impeccable/critique/*
+!.impeccable/critique/ignore.md
+!.impeccable/live/
+.impeccable/live/*
+!.impeccable/live/config.json

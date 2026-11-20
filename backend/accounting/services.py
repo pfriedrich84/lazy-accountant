@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from pydantic import ValidationError
 
@@ -677,11 +677,27 @@ def duplicate_hints(actor, document_id):
     return hints
 
 
-def month_folders(actor, company_id, period, cursor=None):
+def month_folders(actor, company_id, period, cursor=None, status=None):
     company = actor.require(company_id)
     valid_period(period)
+    if status not in (None, "", "open"):
+        raise DomainError("Die Monatsablage unterstützt nur den Statusfilter open.")
     storage.ensure_month(company, period)
-    docs = list_documents(actor, company_id=company_id, period=period, cursor=cursor, limit=100)
+    docs = list_documents(
+        actor, company_id=company_id, period=period, cursor=cursor, limit=100, status=status
+    )
+    # Aggregate the entire authorized month, independently of cursor and view filter.
+    counts = {name: {"total": 0, "ready": 0, "open": 0} for name in (*storage.FOLDERS, "unfiled")}
+    rows = (
+        Document.objects.filter(company=company, period=period, is_excluded=False)
+        .values("kind", "status")
+        .annotate(count=Count("id"))
+    )
+    for row in rows:
+        bucket = counts[storage.KIND_FOLDER.get(row["kind"], "unfiled")]
+        bucket["total"] += row["count"]
+        bucket["ready" if row["status"] == "ready" else "open"] += row["count"]
+    summary = {key: sum(bucket[key] for bucket in counts.values()) for key in ("total", "ready", "open")}
     year, month = period.split("-")
     return {
         "folders": [
@@ -689,9 +705,15 @@ def month_folders(actor, company_id, period, cursor=None):
                 "name": f,
                 "path": f"{company.folder}/{year}/{month}/{f}/",
                 "files": [d for d in docs["results"] if storage.KIND_FOLDER.get(d["kind"]) == f],
+                **counts[f],
             }
             for f in storage.FOLDERS
         ],
+        "unfiled": {
+            "files": [d for d in docs["results"] if d["kind"] not in storage.KIND_FOLDER],
+            **counts["unfiled"],
+        },
+        "summary": summary,
         "total": docs["total"],
         "next_cursor": docs["next_cursor"],
     }
