@@ -40,6 +40,57 @@ def mcp_url(django_db_setup):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_removal_over_real_mcp_and_rest(mcp_url, actor, companies):
+    from accounting import packages
+
+    company = companies[0]
+    package = packages.create_package(actor, company.id, ["2026-10"], "synthetic-empty")
+    token = issue_token(actor, "remove", [company.id], ["read", "process"])["token"]
+    readonly = issue_token(actor, "readonly", [company.id], ["read"])["token"]
+    args = dict(
+        company_id=company.id,
+        package_id=package["id"],
+        expected_version=package["version"],
+        reason="Explicit synthetic removal",
+        idempotency_key="remove",
+    )
+
+    async def scenario():
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + token}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+
+                async def call(name, arguments):
+                    response = await client.call_tool(name, arguments)
+                    assert not response.is_error, response
+                    data = response.structured_content
+                    return data["result"] if data and set(data) == {"result"} else data
+
+                tools = await client.list_tools()
+                schema = next(tool.input_schema for tool in tools.tools if tool.name == "remove_package")
+                assert set(args) <= set(schema["required"])
+                preview = await call(
+                    "preview_package_removal", {"company_id": company.id, "package_id": package["id"]}
+                )
+                assert preview["can_remove"]
+                assert (await call("remove_package", args))["status"] == "completed"
+                body = {key: value for key, value in args.items() if key != "package_id"}
+                response = await http.post(mcp_url + f"/api/packages/{package['id']}/remove/", json=body)
+                assert response.status_code == 200 and response.json()["status"] == "completed"
+                assert await call("list_packages", {"company_id": company.id}) == []
+                detail = await call("get_package", {"package_id": package["id"]})
+                assert detail["removed"] and "download_url" not in detail
+                assert (
+                    await http.get(mcp_url + f"/api/packages/{package['id']}/download/")
+                ).status_code == 410
+                assert (await client.call_tool("remove_package", {**args, "reason": "different"})).is_error
+        async with httpx2.AsyncClient(headers={"Authorization": "Bearer " + readonly}) as http:
+            async with Client(streamable_http_client(mcp_url + "/mcp/", http_client=http)) as client:
+                assert (await client.call_tool("remove_package", args)).is_error
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
 def test_real_streamable_http_month_and_skill_contract(mcp_url, actor, companies):
     company = companies[0]
     token = issue_token(actor, "mcp-test", [company.id], ["read", "process", "inbox"])["token"]

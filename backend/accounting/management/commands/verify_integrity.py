@@ -2,6 +2,7 @@ import io
 import zipfile
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from accounting import storage
 from accounting.models import Dispatch, Document, FileOperation, ImportSource, Package
@@ -44,13 +45,29 @@ class Command(BaseCommand):
                 errors.append(f"Dokument {doc.id}: {e}")
         for package in Package.objects.iterator():
             try:
-                data = storage.path(package.path).read_bytes()
-                if storage.checksum(data) != package.sha256:
-                    raise ValueError("ZIP-Prüfsumme falsch")
-                with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                    for item in package.items.all():
-                        if storage.checksum(archive.read(item.archive_path)) != item.sha256:
-                            raise ValueError(f"Prüfsumme des Snapshot-Dokuments {item.document_id} falsch")
+                with transaction.atomic():
+                    # Serialize with removal, without blocking a supplement's
+                    # parent FK check while its documents are locked.
+                    package = Package.objects.select_for_update(no_key=True).get(pk=package.pk)
+                    removal = getattr(package, "removal", None)
+                    if removal and removal.zip_removed_at:
+                        continue
+                    try:
+                        data = storage.path(package.path).read_bytes()
+                    except FileNotFoundError:
+                        # Cleanup can unlink the ZIP before its completion marker
+                        # is persisted (including a crash in that window).
+                        if removal:
+                            continue
+                        raise
+                    if storage.checksum(data) != package.sha256:
+                        raise ValueError("ZIP-Prüfsumme falsch")
+                    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                        for item in package.items.all():
+                            if storage.checksum(archive.read(item.archive_path)) != item.sha256:
+                                raise ValueError(
+                                    f"Prüfsumme des Snapshot-Dokuments {item.document_id} falsch"
+                                )
             except Exception as e:
                 errors.append(f"Paket {package.id}: {e}")
         for dispatch in Dispatch.objects.iterator():

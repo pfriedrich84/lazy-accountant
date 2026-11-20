@@ -347,7 +347,9 @@ class DocumentFile(APIView):
 class Packages(APIView):
     def get(self, request):
         actor = request_actor(request)
-        qs = Package.objects.filter(company__in=actor.companies()).order_by("-created_at")
+        qs = Package.objects.filter(company__in=actor.companies(), removal__isnull=True).order_by(
+            "-created_at"
+        )
         if request.query_params.get("company_id"):
             qs = qs.filter(company_id=request.query_params["company_id"])
         return Response([packages.package_data(p) for p in qs[:200]])
@@ -378,6 +380,14 @@ class Preview(APIView):
 
 class PackageDetail(APIView):
     def get(self, request, package_id, action=None):
+        if action == "removal-preview":
+            from .package_removal import preview
+
+            try:
+                company_id = int(request.query_params.get("company_id", ""))
+            except TypeError, ValueError:
+                raise DomainError("Gültige company_id erforderlich.") from None
+            return Response(preview(request_actor(request), company_id, package_id))
         p = packages.get_package(request_actor(request), package_id)
         if action == "download":
             response = HttpResponse(packages.package_bytes(p), content_type="application/zip")
@@ -387,6 +397,20 @@ class PackageDetail(APIView):
         return Response(packages.package_data(p, True))
 
     def post(self, request, package_id, action=None):
+        if action == "remove":
+            from .package_removal import remove
+
+            p = request.data
+            return Response(
+                remove(
+                    request_actor(request),
+                    p.get("company_id"),
+                    package_id,
+                    p.get("expected_version"),
+                    p.get("reason"),
+                    p.get("idempotency_key"),
+                )
+            )
         if action != "send":
             raise DomainError("Aktion nicht gefunden.", 404)
         return Response(
