@@ -18,6 +18,7 @@ import {
   type Document,
 } from "./api";
 import { ErrorAlert } from "./components";
+import { FXPayment } from "./fx-payments";
 
 export interface BankMovement {
   merged_into_id?: string | null;
@@ -66,6 +67,10 @@ export interface PaymentStatus {
     transaction_id: string;
     bank_version: number;
     amount: string;
+    invoice_currency?: string;
+    bank_amount?: string;
+    bank_currency?: string;
+    bank_sources?: { document_id: string; locator: string }[];
     decision: string;
     reversed_at: string | null;
     reversal_reason: string;
@@ -78,7 +83,7 @@ export interface PaymentPage<T> {
   next_cursor: number | null;
 }
 export const paymentLabels: Record<string, string> = {
-  unpaid: "Offen",
+  unpaid: "Keine Bankdeckung zugeordnet",
   partially_paid: "Teilweise bezahlt",
   paid: "Bezahlt",
   unresolved: "Ungeklärt",
@@ -90,27 +95,49 @@ export function BankCandidates({ movement }: { movement: BankMovement }) {
     queryKey: ["bank-candidates", movement.id, movement.version],
     queryFn: () =>
       api<{
-        items: { document_id: string; reference: string; reasons: string[] }[];
+        items: {
+          document_id: string;
+          reference: string;
+          reasons: string[];
+          party?: string;
+          invoice_amount?: string;
+          invoice_currency?: string;
+          invoice_date?: string;
+          bank_date?: string;
+          reference_match?: boolean;
+        }[];
       }>(`reconciliation/candidates/?transaction_id=${movement.id}`),
     enabled: open,
   });
   return (
     <Stack spacing={1}>
       <Button onClick={() => setOpen(!open)}>
-        Referenztreffer und Gründe {open ? "ausblenden" : "anzeigen"}
+        Zuordnungskandidaten und Gründe {open ? "ausblenden" : "anzeigen"}
       </Button>
       {open && (
         <>
           <ErrorAlert error={query.error} />
           {query.data?.items.length === 0 && (
             <Typography>
-              Keine passende Rechnungsreferenz. Manuelle Prüfung möglich.
+              Keine passenden Referenz-/Händlerkandidaten. Manuelle Prüfung
+              möglich.
             </Typography>
           )}
           {query.data?.items.map((c) => (
             <Typography key={c.document_id}>
-              <Link to={`/documents/${c.document_id}`}>{c.reference}</Link>:{" "}
-              {c.reasons.join("; ") || "Eindeutiger Treffer"}
+              <Link to={`/documents/${c.document_id}`}>
+                {c.reference || "Rechnung"}
+              </Link>
+              : {c.reasons.join("; ") || "Eindeutiger Treffer"}
+              {c.invoice_currency && (
+                <>
+                  {" "}
+                  · {c.party} · {c.invoice_amount} {c.invoice_currency} ·
+                  Rechnungsdatum {c.invoice_date || "fehlt"} · Bankdatum{" "}
+                  {c.bank_date || "fehlt"} · Referenztreffer{" "}
+                  {c.reference_match ? "ja" : "nein"}
+                </>
+              )}
             </Typography>
           ))}
         </>
@@ -287,9 +314,18 @@ export function PaymentPanel({ doc }: { doc: Document }) {
                 sx={{ borderTop: "1px solid #ddd", pt: 1 }}
               >
                 <Typography>
-                  {a.amount} · {a.decision} · {a.reason}
+                  {a.amount} {a.invoice_currency} · Bankverbrauch{" "}
+                  {a.bank_amount} {a.bank_currency} · {a.decision} · {a.reason}
                   {a.reversed_at ? ` · aufgehoben: ${a.reversal_reason}` : ""}
                 </Typography>
+                {a.bank_sources?.map((s) => (
+                  <Link
+                    key={s.document_id + s.locator}
+                    to={`/documents/${s.document_id}`}
+                  >
+                    Zahlungsherkunft · {s.locator}
+                  </Link>
+                ))}
                 {a.reversal_sources?.map((s) => (
                   <Link
                     key={s.document_id + s.locator}
@@ -361,6 +397,14 @@ export function PaymentPanel({ doc }: { doc: Document }) {
                 {!tx.merged_into_id && <BankCandidates movement={tx} />}
               </>
             )}
+            {tx && tx.currency !== doc.metadata.currency && (
+              <FXPayment
+                key={tx.id}
+                doc={doc}
+                movement={tx}
+                canProcess={!!canProcess}
+              />
+            )}
             <TextField
               label="Zuordnungsbetrag (Dezimalpunkt)"
               value={amount}
@@ -376,6 +420,7 @@ export function PaymentPanel({ doc }: { doc: Document }) {
                 !canProcess ||
                 !tx ||
                 !!tx.merged_into_id ||
+                tx.currency !== doc.metadata.currency ||
                 !amount ||
                 !reason.trim() ||
                 action.isPending

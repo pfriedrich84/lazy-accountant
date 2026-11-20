@@ -1,6 +1,7 @@
 """Bank-only ER/AR reconciliation. All writers serialize on Company, then rows.
 
-No payment execution, FX, tolerances, write-offs, or inference from an amount alone.
+No payment execution, tolerances, write-offs, or inference from an amount alone.
+FX is a separate, explicitly confirmed evidence workflow; never an automatic rule.
 Imported Document IDs are the initial obligation adapter; #9 must reuse these IDs.
 """
 
@@ -18,7 +19,7 @@ from iso4217 import Currency
 
 from . import services, storage
 from .auth import DomainError
-from .bank_parser import MISSING_IDENTITY, reconciliation_entries
+from .bank_parser import FX_DETAIL_DIFFERENCE, MISSING_IDENTITY, reconciliation_entries
 from .models import (
     Account,
     BankTransaction,
@@ -92,8 +93,8 @@ def _invoice(doc):
     return amount, currency
 
 
-def _allocated(qs):
-    return qs.filter(reversed_at__isnull=True).aggregate(total=Sum("amount"))["total"] or Decimal(0)
+def _allocated(qs, field="amount"):
+    return qs.filter(reversed_at__isnull=True).aggregate(total=Sum(field))["total"] or Decimal(0)
 
 
 def payment_status(actor, document_id, as_of=None):
@@ -126,6 +127,13 @@ def status_for_document(doc, as_of=None):
             "transaction_id": str(a.transaction_id),
             "bank_version": a.transaction.version,
             "amount": str(a.amount),
+            "invoice_currency": doc.metadata.get("currency"),
+            "bank_amount": str(a.bank_amount),
+            "bank_currency": a.transaction.currency,
+            "bank_sources": [
+                {"document_id": str(s.document_id), "locator": s.locator}
+                for s in _all_bank_sources(a.transaction)
+            ],
             "decision": a.decision,
             "reason": a.reason,
             "evidence": a.evidence,
@@ -191,7 +199,7 @@ def transaction_data(tx):
     _require_clean_sources(tx)
     used = getattr(tx, "_active_amount", None)
     if used is None:
-        used = _allocated(tx.allocations)
+        used = _allocated(tx.allocations, "bank_amount")
     if hasattr(tx, "_bank_reversal_id"):
         linked_reversal_id = tx._bank_reversal_id
     else:
@@ -307,7 +315,9 @@ def list_transactions(
     qs = (
         qs.annotate(
             _active_amount=Sum(
-                "allocations__amount", filter=Q(allocations__reversed_at__isnull=True), default=Decimal(0)
+                "allocations__bank_amount",
+                filter=Q(allocations__reversed_at__isnull=True),
+                default=Decimal(0),
             ),
             _bank_reversal_id=Subquery(
                 BankTransaction.objects.filter(reversal_of=OuterRef("pk")).values("id")[:1]
@@ -636,11 +646,18 @@ def _candidate_rows(tx):
     for doc in docs.order_by("id"):
         reference = doc.metadata.get("number") or ""
         # Preserve punctuation and token boundaries; never match invoice 12 inside 123.
-        if not reference or not re.search(
-            r"(?<!\w)" + re.escape(reference) + r"(?!\w)", tx.remittance, re.IGNORECASE
-        ):
-            continue
+        reference_match = bool(
+            reference
+            and re.search(r"(?<!\w)" + re.escape(reference) + r"(?!\w)", tx.remittance, re.IGNORECASE)
+        )
         party = doc.metadata.get("recipient" if kind == "outgoing_invoice" else "issuer")
+        fx_candidate = (
+            doc.metadata.get("currency") != tx.currency
+            and bool(party)
+            and (normalized_name(party) == normalized_name(tx.party_name))
+        )
+        if not reference_match and not fx_candidate:
+            continue
         known = (
             VerifiedBankParty.objects.filter(
                 company_id=tx.company_id,
@@ -702,7 +719,21 @@ def _candidate_rows(tx):
                 "document_id": str(doc.id),
                 "document_version": doc.version,
                 "reference": reference,
-                "reasons": reasons,
+                "invoice_currency": doc.metadata.get("currency"),
+                "invoice_amount": doc.metadata.get("gross"),
+                "invoice_date": doc.metadata.get("date"),
+                "bank_date": str(tx.booking_date) if tx.booking_date else None,
+                "party": party,
+                "reference_match": reference_match,
+                "requires_fx_confirmation": doc.metadata.get("currency") != tx.currency,
+                "reasons": reasons
+                + (
+                    ["Rechnungsdatum nach Bankdatum; Einzelfallprüfung erforderlich"]
+                    if fx_candidate
+                    and tx.booking_date
+                    and str(doc.metadata.get("date") or "") > str(tx.booking_date)
+                    else []
+                ),
             }
         )
     if len(results) != 1:
@@ -712,13 +743,20 @@ def _candidate_rows(tx):
 
 
 def candidates(actor, transaction_id):
+    from .fx import VERSION as fx_version
+
     tx = BankTransaction.objects.filter(id=transaction_id, company__in=actor.companies()).first()
     if not tx:
         raise DomainError("Bankbewegung nicht gefunden.", 404)
-    return {"transaction": transaction_data(tx), "rule_version": RULE_VERSION, "items": _candidate_rows(tx)}
+    return {
+        "transaction": transaction_data(tx),
+        "rule_version": RULE_VERSION,
+        "fx_rule_version": fx_version,
+        "items": _candidate_rows(tx),
+    }
 
 
-def _allocate(actor, tx, doc, amount, decision, reason):
+def _allocate(actor, tx, doc, amount, decision, reason, *, bank_amount=None, fx=None):
     _require_clean_document(doc)
     _require_clean_sources(tx)
     if tx.merged_into_id:
@@ -728,19 +766,22 @@ def _allocate(actor, tx, doc, amount, decision, reason):
     if doc.is_excluded or any(s.document.is_excluded for s in _all_bank_sources(tx)):
         raise DomainError("Ausgeschlossene Rechnung/Bankquelle kann keine neue Zahlung belegen.", 409)
     gross, currency = _invoice(doc)
-    if currency != tx.currency or tx.direction != ("CRDT" if doc.kind == "outgoing_invoice" else "DBIT"):
+    bank_amount = amount if bank_amount is None else bank_amount
+    if (currency != tx.currency and not fx) or tx.direction != (
+        "CRDT" if doc.kind == "outgoing_invoice" else "DBIT"
+    ):
         raise DomainError("Richtung oder Währung passt nicht zur Rechnung.")
     if doc.company_id != tx.company_id:
         raise DomainError("Rechnung gehört nicht zur Firma.", 404)
     if (
         not tx.booked
         or tx.reversal
-        or tx.issues
+        or any(issue != FX_DETAIL_DIFFERENCE or not fx for issue in tx.issues)
         or _bank_notes(tx)
         or BankTransaction.objects.filter(reversal_of=tx).exists()
     ):
         raise DomainError("Ungeklärte/nicht gebuchte Bankbewegung kann keine Zahlung belegen.", 409)
-    if amount > tx.amount - _allocated(tx.allocations) or amount > gross - _allocated(
+    if bank_amount > tx.amount - _allocated(tx.allocations, "bank_amount") or amount > gross - _allocated(
         doc.payment_allocations
     ):
         raise DomainError("Verfügbarer Betrag oder Rechnungsrest inzwischen überschritten.", 409)
@@ -750,10 +791,12 @@ def _allocate(actor, tx, doc, amount, decision, reason):
         transaction=tx,
         document=doc,
         amount=amount,
+        bank_amount=bank_amount,
         decision=decision,
         actor_id=actor.user_id,
         reason=reason,
         evidence={
+            "fx": fx,
             "bank_version": tx.version,
             "document_version": doc.version,
             "rule_version": RULE_VERSION if decision == "rule_confirmed" else None,

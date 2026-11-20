@@ -30,6 +30,8 @@ Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel 
 
 ## Bankabgleich (CAMT-Ausbau zu #10)
 
+Fremdwährungsrechnungen können nach beleggebundener Vorschau ausdrücklich mit anderswährenden Kartenbelastungen verknüpft werden. Rechnungsdeckung, Bankverbrauch und Gebühren bleiben getrennt; keine Live-Kurse und keine FX-Automatik. REST-/MCP-Vertrag, unterstützte Originalfelder, Rundung und bewusste Parsergrenzen: [Fremdwährungsdeckung](docs/fx-reconciliation.md).
+
 Ein erster CAMT-basierter Zahlungsstand für importierte Ein- und Ausgangsrechnungen ist unter **Zahlungsstand** und im Dokumentdetail verfügbar. Eindeutige Referenztreffer mit unabhängig verifizierter Gegenpartei/IBAN dürfen automatisch bestätigt werden; Teilzahlungen und Aufhebung sind manuell möglich. Eindeutig referenzierte gebuchte CAMT-Vollrückbuchungen öffnen betroffene Rechnungen automatisch wieder; unklare Bezüge bleiben Prüffälle. Überfälligkeit wird nur angezeigt. Grenzen, Rechte, Migration und verbleibende Arbeit: [Bankabgleich](docs/BANK_RECONCILIATION.md). Kein PDF-only-Abgleich, kein Mahnversand, keine vollständige Erledigung von #10.
 
 ## Erster Ablauf

@@ -202,6 +202,10 @@ class Reconciliation(APIView):
             return Response(bank.list_verified_parties(actor, int(p["company_id"])))
         if action == "status":
             return Response(bank.payment_status(actor, p["document_id"], p.get("as_of")))
+        if action == "fx-evidence":
+            from .fx import get_evidence
+
+            return Response(get_evidence(actor, p["transaction_id"]))
         if action == "candidates":
             return Response(bank.candidates(actor, p["transaction_id"]))
         if action == "transactions":
@@ -237,9 +241,12 @@ class Reconciliation(APIView):
 
         from . import reconciliation as bank
         from .bank_state import set_coverage, set_policy
+        from . import fx
         from .bank_identity import merge as merge_identity, dispute as dispute_identity
         from .payment_schemas import (
             AllocationRequest,
+            FXPreviewRequest,
+            FXConfirmRequest,
             BankIdentityMergeRequest,
             BankIdentityDisputeRequest,
             BankCoverageRequest,
@@ -257,6 +264,8 @@ class Reconciliation(APIView):
             "coverage": (BankCoverageRequest, set_coverage),
             "normalize": (ReconcileRequest, bank.reconcile_document),
             "allocate": (AllocationRequest, bank.allocate),
+            "fx-preview": (FXPreviewRequest, fx.preview),
+            "fx-confirm": (FXConfirmRequest, fx.confirm),
             "reverse": (ReverseAllocationRequest, bank.reverse_allocation),
             "verify-party": (VerifyPartyRequest, bank.verify_party),
             "revoke-party": (RevokePartyRequest, bank.revoke_party),

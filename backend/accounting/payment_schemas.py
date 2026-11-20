@@ -77,6 +77,29 @@ class AllocationRequest(BankRequest):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class FXLeg(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_id: UUID
+    document_version: int = Field(ge=1, strict=True)
+    amount: Decimal = Field(gt=0, lt=Decimal("1e14"), max_digits=20, decimal_places=6)
+    bank_principal: Decimal = Field(gt=0, lt=Decimal("1e14"), max_digits=20, decimal_places=6)
+    fee: Decimal = Field(ge=0, lt=Decimal("1e14"), max_digits=20, decimal_places=6)
+
+
+class FXPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    transaction_id: UUID
+    bank_version: int = Field(ge=1, strict=True)
+    evidence_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    legs: list[FXLeg] = Field(min_length=1, max_length=100)
+
+
+class FXConfirmRequest(FXPreviewRequest):
+    preview_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reason: str = Field(min_length=1, max_length=1000)
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+
 class ReverseAllocationRequest(BankRequest):
     allocation_id: UUID
     bank_version: int = Field(ge=1, strict=True)

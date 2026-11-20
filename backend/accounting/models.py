@@ -447,7 +447,9 @@ class PaymentAllocation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     transaction = models.ForeignKey(BankTransaction, on_delete=models.PROTECT, related_name="allocations")
     document = models.ForeignKey(Document, on_delete=models.PROTECT, related_name="payment_allocations")
+    # amount is always invoice currency; bank_amount includes separately evidenced fees.
     amount = models.DecimalField(max_digits=20, decimal_places=6)
+    bank_amount = models.DecimalField(max_digits=20, decimal_places=6)
     decision = models.CharField(max_length=30)
     evidence = models.JSONField(default=dict)
     reason = models.CharField(max_length=1000)
@@ -463,7 +465,10 @@ class PaymentAllocation(models.Model):
     )
 
     class Meta:
-        constraints = [models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_allocation")]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="positive_allocation"),
+            models.CheckConstraint(condition=models.Q(bank_amount__gt=0), name="positive_bank_allocation"),
+        ]
 
 
 class BankAutomationPolicy(models.Model):

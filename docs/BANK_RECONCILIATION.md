@@ -6,7 +6,7 @@ In der Implementierungssession ausdrücklich entschieden:
 
 - Eindeutig belegte Treffer dürfen automatisch bestätigt werden, nicht nur vorgeschlagen.
 - CAMT hat Vorrang. PDF-only bleibt erwünscht, ist aber nachrangig.
-- Aktuell kein Bedarf an Skonto, Gebührenausgleich, FX, Kreditkarten- oder Providerabstimmung. Abweichungen werden **nicht** still ausgeglichen.
+- Im ursprünglichen #10-Umfang kein Skonto, Gebührenausgleich, FX, Kreditkarten- oder Providerabgleich. Die explizite Folgearbeit #28 ergänzt jetzt [beleggebundene FX-Kartenbelastungszuordnung](fx-reconciliation.md), ohne die Automatik auszuweiten. Abweichungen werden **nicht** still ausgeglichen.
 - Überfälligkeit nur anzeigen; keine Mahnentwürfe, kein Mahnversand.
 - Eindeutig im CAMT referenzierte Rückbuchungen automatisch berücksichtigen; nach erfolgreicher CAMT-Abnahme mergen und verbleibende Punkte in #10 offen halten.
 

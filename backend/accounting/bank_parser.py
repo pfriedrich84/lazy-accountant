@@ -8,6 +8,7 @@ from defusedxml import ElementTree
 from .camt import SUPPORTED_NAMESPACES
 
 MISSING_IDENTITY = "Keine belastbare Bankkennung; Identität ungeklärt"
+FX_DETAIL_DIFFERENCE = "Detailbetrag weicht vom Buchungsbetrag ab"
 
 
 def reconciliation_entries(data):
@@ -65,7 +66,7 @@ def reconciliation_entries(data):
                 if len(details) > 1 and not split:
                     issues.append("Sammelbuchungsdetails nicht vollständig abstimmbar")
                 if len(details) == 1 and parts[0][0] is not None and parts[0] != (total, currency):
-                    issues.append("Detailbetrag weicht vom Buchungsbetrag ab")
+                    issues.append(FX_DETAIL_DIFFERENCE)
                 status = text(entry, "Sts/Cd") or text(entry, "Sts")
                 reference = text(detail, "Refs/AcctSvcrRef") if detail is not None else ""
                 # Aggregate references cannot identify multiple individual children.
