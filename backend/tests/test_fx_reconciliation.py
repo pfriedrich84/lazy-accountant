@@ -17,6 +17,134 @@ STRUCTURED = """<AmtDtls><InstdAmt><Amt Ccy="USD">60.00</Amt><CcyXchg>
 </CcyXchg></InstdAmt></AmtDtls><Chrgs><Rcrd><Amt Ccy="EUR">1.00</Amt></Rcrd></Chrgs>"""
 
 
+ECOMM_A = "E-COMM       84,00 USD K7   16.04. 09:42FABLEX, LAB. NEW CLOUDPORT 58243 840SPESEN: 1,75  KURS: 1,200000  VOM:14.04.2031"
+ECOMM_B = "E-COMM       96,00 USD K7   08.04. 17:36CLOUDLOOMS, LAB NOV VALE 58342 840SPESEN: 2,25  KURS: 1,280000  VOM:07.04.2031"
+
+
+def ecomm_setup(actor, company, text=ECOMM_A, amount="71.75", fields=None):
+    if fields is None:
+        fields = (
+            f'<AmtDtls><InstdAmt><Amt Ccy="EUR">{amount}</Amt></InstdAmt>'
+            f'<TxAmt><Amt Ccy="EUR">{amount}</Amt></TxAmt></AmtDtls>'
+        )
+    data = camt(amount=amount, direction="DBIT", number=text).replace(b"<Refs>", fields.encode() + b"<Refs>")
+    data = data.replace(b"camt.053.001.08", b"camt.053.001.02")
+    result = normalize(actor, statement(actor, company, data))
+    assert not result["confirmed"]
+    return BankTransaction.objects.get(id=result["transaction_ids"][0])
+
+
+@pytest.mark.parametrize(
+    "text,amount,original,principal,fee,rate",
+    [
+        (ECOMM_A, "71.75", "84.00", "70.00", "1.75", "1.200000"),
+        (ECOMM_B, "77.25", "96.00", "75.00", "2.25", "1.280000"),
+    ],
+)
+def test_ecomm_neutral_structures_full_confirmation_and_undo(
+    actor, companies, text, amount, original, principal, fee, rate
+):
+    inv = usd_invoice(actor, companies[0], gross=original)
+    tx = ecomm_setup(actor, companies[0], text, amount)
+    result = fx.get_evidence(actor, tx.id)
+    assert not result["issues"]
+    ev = result["items"][0]
+    assert ev["method"] == "bank-ecomm-v1"
+    assert ev["quote"] == text
+    assert text[ev["text_start"] : ev["text_end"]] == text
+    assert ev["original_amount"] == original and ev["rate"] == rate
+    assert ev["rate_direction"] == "original currency per bank currency"
+    assert ev["fee"] == fee and ev["card_date"] == ""
+    assert ev["direction_basis"] == "unique rounded amount consistency"
+    assert ev["fee_basis"] == "bank currency, included; amount consistency"
+    request, preview = plan(actor, tx, [leg(inv, original, principal, fee)])
+    assert preview["review_required"]
+    assert any("datum" in reason.lower() for reason in preview["legs"][0]["review_reasons"])
+    key = str(uuid4())
+    saved = confirm(actor, request, preview, key)
+    assert confirm(actor, request, preview, key) == saved
+    assert bank.payment_status(actor, inv["id"])["status"] == "paid"
+    tx.refresh_from_db()
+    assert Decimal(bank.transaction_data(tx)["available"]) == 0
+    bank.reverse_allocation(actor, saved["allocation_ids"][0], tx.version, "Synthetic undo", str(uuid4()))
+    tx.refresh_from_db()
+    assert Decimal(bank.transaction_data(tx)["available"]) == Decimal(amount)
+    assert bank.payment_status(actor, inv["id"])["status"] == "unpaid"
+
+
+def test_ecomm_duplicate_unstructured_nodes_are_ambiguous(actor, companies):
+    fields = f"<RmtInf><Ustrd>{TEXT}</Ustrd></RmtInf>"
+    tx = ecomm_setup(actor, companies[0], fields=fields)
+    result = fx.get_evidence(actor, tx.id)
+    assert not result["items"] and result["issues"]
+
+
+def test_ecomm_rounded_direction_ambiguity_is_rejected(actor, companies):
+    text = ECOMM_A.replace("84,00", "0,01").replace("1,75", "0,00").replace("1,200000", "1,000001")
+    tx = ecomm_setup(actor, companies[0], text=text, amount="0.01")
+    result = fx.get_evidence(actor, tx.id)
+    assert not result["items"]
+    assert "Mehrdeutige Kursrichtung" in result["issues"][0]["reason"]
+
+
+def test_ecomm_inverse_cumulative_rounding(actor, companies):
+    inv = usd_invoice(actor, companies[0], gross="84.00")
+    tx = ecomm_setup(actor, companies[0])
+    request, preview = plan(actor, tx, [leg(inv, "1.00", "0.83", "0.00")])
+    confirm(actor, request, preview)
+    request, preview = plan(actor, tx, [leg(inv, "83.00", "69.17", "1.75")])
+    confirm(actor, request, preview)
+    assert bank.payment_status(actor, inv["id"])["status"] == "paid"
+
+
+@pytest.mark.parametrize("fields", ["", '<AmtDtls><InstdAmt><Amt Ccy="EUR">71.75</Amt></InstdAmt></AmtDtls>'])
+def test_ecomm_absent_or_neutral_instructed_amount(actor, companies, fields):
+    tx = ecomm_setup(actor, companies[0], fields=fields)
+    assert fx.get_evidence(actor, tx.id)["items"]
+
+
+@pytest.mark.parametrize(
+    "text,amount",
+    [
+        (ECOMM_A.replace("SPESEN: 1,75", "SPESEN: 2,75"), "71.75"),
+        (ECOMM_A.replace("SPESEN:", "GEBUEHR:"), "71.75"),
+        (ECOMM_A.replace("KURS:", "RATE:"), "71.75"),
+        (ECOMM_A.replace("1,200000", "0,000000"), "71.75"),
+        (ECOMM_A.replace("1,200000", "1,000000"), "85.75"),
+        (ECOMM_A.replace("1,200000", "0,500000"), "43.75"),
+        (ECOMM_A.replace("16.04.", "31.02."), "71.75"),
+        (ECOMM_A.replace("09:42", "25:42"), "71.75"),
+        (ECOMM_A.replace("14.04.2031", "31.02.2031"), "71.75"),
+        (ECOMM_A.replace("84,00", "84.00"), "71.75"),
+        (ECOMM_A.replace("K7   ", "K7  "), "71.75"),
+        (ECOMM_A + " " + ECOMM_A, "71.75"),
+        (ECOMM_A + " " + TEXT, "71.75"),
+        (ECOMM_A + " KURS: 1,300000", "71.75"),
+    ],
+)
+def test_ecomm_invalid_or_ambiguous_text(actor, companies, text, amount):
+    tx = ecomm_setup(actor, companies[0], text=text, amount=amount)
+    result = fx.get_evidence(actor, tx.id)
+    assert not result["items"] and result["issues"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        '<AmtDtls><InstdAmt><Amt Ccy="USD">84.00</Amt></InstdAmt></AmtDtls>',
+        '<AmtDtls><InstdAmt><Amt Ccy="EUR">70.00</Amt></InstdAmt></AmtDtls>',
+        '<AmtDtls><TxAmt><Amt Ccy="EUR">70.00</Amt></TxAmt></AmtDtls>',
+        "<AmtDtls><TxAmt><CcyXchg><SrcCcy>USD</SrcCcy></CcyXchg></TxAmt></AmtDtls>",
+        '<AmtDtls><CntrValAmt><Amt Ccy="USD">85.00</Amt></CntrValAmt></AmtDtls>',
+        '<Chrgs><Rcrd><Amt Ccy="EUR">9.00</Amt></Rcrd></Chrgs>',
+    ],
+)
+def test_ecomm_cannot_override_structural_fx_or_conflicts(actor, companies, fields):
+    tx = ecomm_setup(actor, companies[0], fields=fields)
+    result = fx.get_evidence(actor, tx.id)
+    assert not result["items"] and result["issues"]
+
+
 def usd_invoice(actor, company, gross="60.00", number="SYNTHETIC-FX-1", kind="incoming_invoice"):
     inv = invoice(actor, company, kind=kind, gross=gross, number=number)
     doc = Document.objects.get(id=inv["id"])
@@ -141,8 +269,9 @@ def test_missing_ambiguous_and_inconsistent_evidence(actor, companies, text):
     assert bank.payment_status(actor, inv["id"])["status"] == "unpaid"
 
 
-def test_structured_preferred_over_text(actor, companies):
-    _, tx = setup(actor, companies[0], structured=True, text=TEXT.replace("FEE 1.00", "FEE 9.00"))
+@pytest.mark.parametrize("text", [TEXT.replace("FEE 1.00", "FEE 9.00"), ECOMM_A])
+def test_structured_preferred_over_text(actor, companies, text):
+    _, tx = setup(actor, companies[0], structured=True, text=text)
     assert fx.get_evidence(actor, tx.id)["items"][0]["fee"] == "1.00"
 
 
@@ -191,8 +320,10 @@ def test_text_cannot_override_unexplained_structural_detail_difference(actor, co
     data = camt(amount="56.00", direction="DBIT", number=TEXT).replace(b"<Refs>", fields.encode() + b"<Refs>")
     result = normalize(actor, statement(actor, companies[0], data))
     tx = BankTransaction.objects.get(id=result["transaction_ids"][0])
-    with pytest.raises(DomainError, match="strukturierte FX-Belege"):
-        plan(actor, tx, [leg(inv)])
+    evidence = fx.get_evidence(actor, tx.id)
+    assert not evidence["items"] and evidence["issues"]
+    with pytest.raises(DomainError, match="FX-Belege fehlen"):
+        fx.preview(actor, tx.id, tx.version, "0" * 64, [leg(inv)])
 
 
 def test_stale_preview_double_consumption_and_idempotency_conflict(actor, companies):
@@ -268,15 +399,22 @@ def test_fx_snapshot_supplement_is_frozen_and_exports_evidence(actor, companies)
     assert packages.package_bytes(packages.get_package(actor, before["id"])) == frozen
 
 
-def test_rest_fx_preview_confirmation_and_schema(client, actor, companies):
-    inv, tx = setup(actor, companies[0])
+@pytest.mark.parametrize("ecomm", [False, True])
+def test_rest_fx_preview_confirmation_and_schema(client, actor, companies, ecomm):
+    if ecomm:
+        inv = usd_invoice(actor, companies[0], gross="84.00")
+        tx = ecomm_setup(actor, companies[0])
+        row = leg(inv, "84.00", "70.00", "1.75")
+    else:
+        inv, tx = setup(actor, companies[0])
+        row = leg(inv)
     response = client.get("/api/reconciliation/fx-evidence/", {"transaction_id": str(tx.id)})
     assert response.status_code == 200
     request = {
         "transaction_id": str(tx.id),
         "bank_version": tx.version,
         "evidence_id": response.json()["items"][0]["id"],
-        "legs": [leg(inv)],
+        "legs": [row],
     }
     response = client.post("/api/reconciliation/fx-preview/", request, format="json")
     assert response.status_code == 200

@@ -12,7 +12,8 @@ der dieser Zuordnung ausdrücklich zugewiesenen Gebühr. Migration 0013 übernim
 für bestehende Gleichwährungszuordnungen exakt den bisherigen Betrag.
 
 Die unveränderliche FX-Evidenz hält Original-Kartenbetrag/-währung, gebuchten
-Bankbetrag/-währung, Kursrichtung (Bankwährung je Originalwährung), getrennte
+Bankbetrag/-währung, explizite Kursrichtung (Bankwährung je Originalwährung oder
+inverse Notierung bei E-COMM), getrennte
 Gebühr, Quellen-ID, Dokumentversion, SHA-256, XML-Pfade und gegebenenfalls
 Textzitat/Zeichenpositionen fest. Rechnungsoriginale und Bankbewegungen werden
 nicht umgeschrieben. Rechnungswährung muss mit Original-Kartenwährung übereinstimmen.
@@ -22,10 +23,13 @@ Decimal-Arithmetik, maximal 40 Kursstellen, 64 Stellen Arbeitspräzision und
 
 ```
 round(Originalbetrag * belegter Kurs) + belegte Gebühr = Bankbetrag
+# Bei invers notiertem E-COMM-Kurs (Originalwährung je Bankwährung):
+round(Originalbetrag / belegter Kurs) + belegte Gebühr = Bankbetrag
 ```
 
 Teilzuordnungen verwenden kumulierte Rundung: neue Bank-Rechnungsdeckung =
-`round((bisherige Originaldeckung + neue Deckung) * Kurs) - bisheriger Bank-Rechnungsanteil`.
+`round((bisherige Originaldeckung + neue Deckung) * Kurs) - bisheriger Bank-Rechnungsanteil`
+(bei inverser Notierung Division statt Multiplikation, ohne vorherige Rundung eines Kehrwerts).
 So bleibt auch die letzte Minor Unit konsistent. Gebühren zählen niemals als
 Rechnungszahlung. Nicht verbrauchte Gebühren bleiben als Bankrest sichtbar;
 es gibt keine implizite Gebührenbuchung oder Abschreibung.
@@ -40,17 +44,57 @@ explizit belegt sein. Abweichende Detailbeträge werden nicht für die Automatik
 freigegeben; nur die FX-Prüfung darf eine durch die Originalfelder vollständig
 abgestimmte Abweichung bestätigen.
 
-Fehlen Strukturfelder, erkennt `bank-text-v1` ausschließlich diese genaue,
+Fehlen strukturierte FX-Angaben, erkennt `bank-text-v1` ausschließlich diese genaue,
 einmalig vorkommende Syntax innerhalb eines `RmtInf/Ustrd` (synthetisches Beispiel):
 
 ```
 ORIGINAL 60.00 USD; RATE 0.916666666666667 USD/EUR; FEE 1.00 EUR; CARD DATE 2026-10-01
 ```
 
+Zusätzlich unterstützt `bank-ecomm-v1` genau die folgende, quellengeprüfte
+E-COMM-Grammatik (vollständig synthetisches Beispiel):
+
+```text
+E-COMM       84,00 USD K7   16.04. 09:42FABLEX, LAB. NEW CLOUDPORT 58243 840SPESEN: 1,75  KURS: 1,200000  VOM:14.04.2031
+```
+
+Diese Grammatik muss ein gesamtes einzelnes `RmtInf/Ustrd` ausfüllen, ohne
+Whitespace-Normalisierung: sieben ASCII-Leerzeichen nach `E-COMM`, drei nach der
+Kartenkennung (Buchstabe + Ziffer), je zwei vor `KURS:` und `VOM:`. Kein Abstand
+zwischen Uhrzeit und Händler sowie zwischen dreistelligem Ländercode und
+`SPESEN:`. Händler-/Ortstext erlaubt Großbuchstaben, Ziffern, Leerzeichen,
+Komma, Punkt und Bindestrich; vor dem Ländercode steht eine fünfstellige Postleitzahl.
+Beträge haben zwei, der Kurs sechs Nachkommastellen mit Dezimalkomma.
+Unterstützt werden nur EUR-Bankbelastungen mit abweichender Originalwährung.
+
+`KURS:` und `SPESEN:` deklarieren selbst weder Kursrichtung noch Gebührenwährung.
+Für diese Grammatik wird die inverse Relation geprüft:
+`round(Original / KURS) + SPESEN = Bankbetrag EUR`.
+Passt auch die Multiplikation auf denselben Centbetrag, ist die Richtung mehrdeutig
+und es gibt keine Evidenz. Die Evidenz bewahrt den notierten Kurs unverändert mit
+`rate_direction = "original currency per bank currency"` sowie `direction_basis`
+und `fee_basis`: Richtung und EUR-Inklusivgebühr sind durch Betragskonsistenz
+abgeleitet, nicht strukturiert deklariert. Die Vorschau weist ausdrücklich darauf
+hin; eine Bestätigung bleibt erforderlich. Das Rundungsverfahren ist die lokale
+Abgleichregel, keine Behauptung über die interne Bankberechnung.
+
+Das Karten-/Uhrzeitfeld hat kein Jahr. Es bleibt als `card_date_text` erhalten;
+`card_date` bleibt leer und die Datumsprüfung offen. `VOM:` bleibt als `vom_text`
+erhalten und wird nicht als Karten- oder Kursdatum interpretiert. Ungültige
+Kalendertage/Uhrzeiten werden abgelehnt; ein Jahr wird nicht ergänzt.
+
+Ein vorhandenes gleichwähriges `InstdAmt/Amt` oder `TxAmt/Amt` sperrt den
+Text-Fallback nicht, sofern **alle** vorhandenen Detailbeträge exakt dem gebuchten
+Bankbetrag/-währung entsprechen und keine `CcyXchg`- oder `Chrgs`-Angaben vorliegen.
+Fremdwährungsbeträge, abweichende Detailbeträge, unvollständige FX-Strukturen und
+strukturierte Gebühren dürfen nicht durch Text übersteuert werden. Vollständige
+strukturierte FX-Belege behalten Vorrang. Mehrere Textbelegstellen, auch über beide
+Textgrammatiken oder mehrere `Ustrd` verteilt, sind mehrdeutig.
+
 Das ist **kein allgemeiner Banktext- oder Sprachparser**. Andere Schreibweisen,
-fehlende Gebühren, unvollständige Strukturfelder, mehrere Belegstellen oder
+fehlende Gebühren, unvollständige FX-Strukturfelder, mehrere Belegstellen oder
 widersprüchliche Quellen bleiben ungeklärt. Weitere Bankformate benötigen einen
-separaten versionierten Parser mit synthetischen Tests; keine Interpretation
+separaten versionierten Parser mit synthetischen Tests; keine Rechnungszuordnung
 anhand eines Betrags allein. FX-Gutschriften mit Gebühren und mehrteilige
 CAMT-Sammelbuchungen werden bewusst nicht unterstützt. Atomare Sammelzuordnung
 einer eindeutigen Bankbewegung auf mehrere Rechnungen ist dagegen möglich.
