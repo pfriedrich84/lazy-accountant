@@ -156,7 +156,9 @@ test("CAMT-Identität verknüpfen und beanstanden ohne Zahlungen zu verschieben"
   await expect(
     page
       .getByRole("alert")
-      .filter({ hasText: "Identitätszusammenführung bestritten" }),
+      .filter({
+        hasText: `Identitätszusammenführung bestritten · kanonische Bewegung ${ids[1]}`,
+      }),
   ).toBeVisible();
   const movements = await (
     await page.request.get(
