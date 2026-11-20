@@ -4,6 +4,10 @@ Selbst betriebene, deutschsprachige Webanwendung für Dokumenteingang und Monats
 
 Django/DRF + PostgreSQL · React/TypeScript mit React Router Framework-SPA, Material UI und TanStack Query · Django-Q2 mit ORM-Broker · offizielles MCP Python SDK v2. **Keine serverseitige LLM-Anbindung, kein eigener Monatszeitplaner.** Orca startet den externen Agenten.
 
+## Frontend-Design-Skill
+
+[Impeccable](docs/IMPECCABLE.md) ist projektlokal für Pi unter `.pi/skills/impeccable/` installiert. Nach `/reload` beispielsweise `/skill:impeccable critique die Dokumentübersicht` verwenden. Keine zusätzliche Laufzeitabhängigkeit und keine automatischen CI- oder Design-Hooks.
+
 ## Start mit Docker Compose
 
 Voraussetzung: Docker Engine mit Compose-Plugin und Python 3 zum einmaligen Erzeugen der Konfiguration. Docker legt die benannten Volumes für PostgreSQL und Dokumente selbst an; kein Host-Ablageordner ist nötig. Der Web-/API-/MCP-Port **8000 wird am Host veröffentlicht** (`0.0.0.0:8000`); Datenbank- und ClamAV-Port bleiben intern. ClamAV benötigt zusätzlich bis zu 3 GiB RAM; mindestens etwa 6 GiB für den Stack vorsehen.
