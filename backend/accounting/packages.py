@@ -14,7 +14,7 @@ from openpyxl import Workbook
 
 from . import naming, storage
 from .auth import DomainError
-from .models import Document, FileOperation, Package, PackageItem
+from .models import Document, FileOperation, Package, PackageItem, PackageRemoval
 from .services import document_data, valid_period
 
 COLUMNS = [
@@ -52,6 +52,7 @@ def package_data(p, detailed=False):
         "size": p.size,
         "created_at": p.created_at.isoformat(),
         "security_blocked": package_blockers(p),
+        "removed": PackageRemoval.objects.filter(package=p).exists(),
     }
     if detailed:
         data["snapshot"] = copy.deepcopy(p.snapshot)
@@ -102,6 +103,8 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         raise DomainError("Ein bis 24 Monate auswählen.")
     periods = sorted(set(valid_period(p) for p in periods))
     parent = get_package(actor, parent_id) if parent_id else None
+    if parent:
+        require_package_available(parent)
     if parent and (parent.company_id != company.id or parent.periods != periods):
         raise DomainError("Nachtrag muss dieselbe Firma und dieselben Monate betreffen.")
     # Latest observed states win across the complete supplement chain. v1 only
@@ -484,7 +487,13 @@ def package_blockers(package):
     ]
 
 
+def require_package_available(package):
+    if PackageRemoval.objects.filter(package_id=package.id).exists():
+        raise DomainError("Paket wurde entfernt; Download, Nachtrag und Versand sind gesperrt.", 410)
+
+
 def require_package_safe(package):
+    require_package_available(package)
     blockers = package_blockers(package)
     if blockers:
         raise DomainError(
@@ -502,8 +511,15 @@ def require_package_safe(package):
 
 
 def package_bytes(package):
-    require_package_safe(package)
-    data = storage.path(package.path).read_bytes()
-    if storage.checksum(data) != package.sha256:
-        raise DomainError("Paket-Prüfsumme stimmt nicht.", 409)
-    return data
+    # Materialize the complete response under the same lock used by removal.
+    # A download authorized before removal may finish; later requests get 410.
+    with transaction.atomic():
+        # NO KEY UPDATE also serializes removal, but permits the KEY SHARE
+        # needed by a concurrent supplement's parent FK check. A full UPDATE
+        # lock deadlocks if that builder already holds our document locks.
+        package = Package.objects.select_for_update(no_key=True).get(id=package.id)
+        require_package_safe(package)
+        data = storage.path(package.path).read_bytes()
+        if storage.checksum(data) != package.sha256:
+            raise DomainError("Paket-Prüfsumme stimmt nicht.", 409)
+        return data

@@ -34,6 +34,15 @@ Version 1.2. Orca Server startet den externen Agenten. Lazy Accountant hat keine
 13. Große ZIPs sind in nummerierte Binärteile mit Gesamtinhaltsliste aufgeteilt. Nur vollständige Teile ergeben das ZIP; vollständige Annahme aller Nachrichten überprüfen. Rekonstruktion und Gesamt-SHA256 sind dokumentiert, ein einzelner Teil ist kein eigenständiges ZIP.
 14. `report_agent_run(job_id, result={…}, status="done"|"failed"|"running")` mit Dokument-IDs/Revisionen, Paket-ID, Versand-ID, bearbeiteten/übersprungenen/offenen Fällen, gebündelten `category_suggestions` gemäß Belegskill und konkreten Hinweisen speichern. Beim Fortschreiben eines laufenden Zwischenberichts bisherige Vorschläge und andere Ergebnisfelder bewahren; abgeschlossene Berichte nicht überschreiben. `running` kann Zwischenstände für eine spätere Wiederaufnahme sichern.
 
+## Pakete ausdrücklich entfernen und neu erstellen
+
+- Entfernung braucht einen eigenen vertrauenswürdigen Nutzerauftrag; ein Erstellungsauftrag ist weder Lösch- noch Versandauftrag. Keine direkten Storage-/DB-Eingriffe.
+- `preview_package_removal(company_id, package_id)` lesen: Version, Snapshot/Monate/Größe, Parent-/Nachträge, Jobs, Download- und Versandstatus sowie Sperrgründe berichten. Sperren nicht umgehen, keine Kaskade.
+- Nur bei ausdrücklicher Autorisierung und freier Vorschau `remove_package(company_id, package_id, expected_version, reason, idempotency_key="<Auftrag>:entfernen:<Paket-ID>")` mit `read`/`process` ausführen. Schlüssel bei Retry unverändert lassen. `cleanup_pending` ist **nicht abgeschlossen**; erneute Löschvorschau zeigt den Status. `completed` bestätigt ZIP-Bereinigung und logische Entfernung, nicht Löschung von Auditdaten.
+- Dokumente/Revisionen, Bankbewegungen, Zahlungszuordnungen und Quellen bleiben unverändert. Versandaufträge (auch accepted/unknown/failed), Nachträge und aktive/referenzierende Paketjobs schützen alte Pakete. Entfernte Pakete bleiben als Audit lesbar, aber nicht herunterladbar/versendbar und nicht als Nachtragsbasis nutzbar.
+- Separat autorisierte Neuerstellung: aktuelle `preview_package` **ohne Parent** prüfen, `create_package` mit **neuem Erstellungskey**, `get_job` bis Abschluss, dann `get_package`. Alter Key liefert den alten Auftrag, keine neue Version. Neuer Snapshot entsteht aus dem aktuellen bereinigten Beleg-/Zahlungsbestand; keine Kopie eines entfernten Snapshots. Ohne Versandauftrag anschließend enden.
+- Vollständiger Vertrag: `docs/MCP.md`, Abschnitt „Pakete entfernen und neu erstellen“.
+
 ## Abschlussbericht
 
 Firma und Monat, externe Auftrags-/Lazy-Accountant-Job-ID, Paketversion und Nachtragsbezug, enthaltene/ausgeschlossene Dokumente, offene Fälle, Empfänger, Versandstatus und Teile sowie verbleibende Schritte nennen. Keine bestätigte Zustellung behaupten. Produktive Orca-Einrichtung und echte Mailzugänge sind getrennte Live-Einrichtung, nicht durch synthetische Tests ersetzt.

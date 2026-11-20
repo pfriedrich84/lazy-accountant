@@ -41,6 +41,18 @@ def enqueue_job(actor, company_id, kind, idempotency_key, payload=None):
         raise DomainError("Ungültiger Auftrag oder Idempotenzschlüssel.")
     payload = payload or {}
     with transaction.atomic():
+        if kind == "package":
+            from django.contrib.auth import get_user_model
+
+            get_user_model().objects.select_for_update().get(id=actor.user_id)
+            actor.companies("process").select_for_update().get(id=company_id)
+            if payload.get("parent_id"):
+                from .packages import get_package, require_package_available
+
+                parent = get_package(actor, payload["parent_id"])
+                if parent.company_id != company_id:
+                    raise DomainError("Nachtrag gehört zu einer anderen Firma.")
+                require_package_available(parent)
         j, created = Job.objects.get_or_create(
             company_id=company_id,
             kind=kind,
@@ -170,6 +182,15 @@ def maintenance():
 
     scan_maintenance()
     reconcile()
+    from .models import PackageRemoval
+    from .package_removal import cleanup
+
+    for removal_id in PackageRemoval.objects.filter(zip_removed_at__isnull=True).values_list("id", flat=True):
+        try:
+            cleanup(removal_id)
+        except Exception:
+            # One damaged cleanup entry must not block unrelated job recovery.
+            logger.exception("Package ZIP cleanup failed for removal %s", removal_id)
     cutoff = timezone.now() - timedelta(seconds=480)
     for job_id in Job.objects.filter(status="running", heartbeat__lt=cutoff).values_list("id", flat=True):
         with transaction.atomic():

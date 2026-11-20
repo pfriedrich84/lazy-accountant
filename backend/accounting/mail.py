@@ -374,7 +374,12 @@ def queue_dispatch(actor, package_id, idempotency_key, resend_of=None):
     if not idempotency_key or len(idempotency_key) > 120:
         raise DomainError("Idempotenzschlüssel erforderlich.")
     with transaction.atomic():
+        from django.contrib.auth import get_user_model
+
+        get_user_model().objects.select_for_update().get(id=actor.user_id)
+        actor.companies("send").select_for_update().get(id=package.company_id)
         package = type(package).objects.select_for_update().get(id=package.id)
+        require_package_safe(package)
         previous = Dispatch.objects.filter(package=package, idempotency_key=idempotency_key).first()
         if previous:
             if str(previous.resend_of_id or "") != str(resend_of or ""):
