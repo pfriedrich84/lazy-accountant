@@ -129,6 +129,13 @@ def settlement_status(metadata):
     return None
 
 
+def supplementary_receipt(document):
+    """Only explicitly classified payment confirmations are non-expense companions."""
+    return document["kind"] == "receipt" and (
+        document["metadata"].get("subtype") or ""
+    ).strip().casefold() in {"supplementary_payment_receipt", "payment_receipt", "zahlungsbeleg"}
+
+
 def build_workbook(snapshot, package_id, version):
     """No queries here: snapshots and payment-only supplements must stay reproducible."""
     wb = Workbook()
@@ -143,7 +150,7 @@ def build_workbook(snapshot, package_id, version):
     )[:32767]
     docs = snapshot.get("workbook_documents", snapshot["documents"])
     documents = {d["id"]: d for d in docs}
-    payments = {p["document_id"]: p for p in snapshot.get("payments", [])}
+    payments = {p["document_id"]: p for p in snapshot.get("payments", []) if p["document_id"] in documents}
     transactions = {t["id"]: t for t in snapshot.get("allocation_transactions", [])}
     contained = {d["id"]: d for d in snapshot["documents"]}
     folder = snapshot["company"]["folder"]
@@ -204,7 +211,7 @@ def build_workbook(snapshot, package_id, version):
             "eigene Prüfsumme enthalten; die ZIP-Prüfsumme steht am gespeicherten Paket.",
         ],
         ["Nicht zugeordneter Eingang", len(snapshot.get("unassigned_inbox", []))],
-        ["Ergänzende Zahlungsbelege", sum(d["kind"] == "receipt" for d in docs)],
+        ["Ergänzende Zahlungsbelege", sum(supplementary_receipt(d) for d in docs)],
         [
             "Keine Doppelerfassung",
             "Ergänzende Zahlungsbelege stehen nur in der Inhaltsliste, nicht als zweite Rechnung.",
@@ -217,11 +224,15 @@ def build_workbook(snapshot, package_id, version):
     ]
     totals = {}
     for tx in snapshot.get("bank_transactions", []):
-        key = (tx.get("account_name", ""), tx.get("currency", ""))
-        counts = totals.setdefault(key, {"CRDT": Decimal(0), "DBIT": Decimal(0), "count": 0})
+        account = f"{tx.get('account_name', '')} [{tx.get('account_identifier') or tx.get('account_id', '')}]"
+        key = (tx.get("account_id"), tx.get("currency", ""))
+        counts = totals.setdefault(
+            key, {"CRDT": Decimal(0), "DBIT": Decimal(0), "count": 0, "label": account}
+        )
         counts[tx["direction"]] += number(tx["amount"]) or Decimal(0)
         counts["count"] += 1
-    for (account, currency), total in totals.items():
+    for (_, currency), total in totals.items():
+        account = total["label"]
         overview.extend(
             [
                 [f"Bankbewegungen {account} ({currency})", total["count"]],
@@ -270,13 +281,14 @@ def build_workbook(snapshot, package_id, version):
         "Hinweise",
         "Zahlbetrag laut Original",
         "Kostenübernahme Dritte",
+        "Kategorie",
     ]
     for title, kinds, partner in [
-        ("Eingangsrechnungen", {"incoming_invoice", "incoming_credit"}, "issuer"),
+        ("Eingangsrechnungen", {"incoming_invoice", "incoming_credit", "receipt"}, "issuer"),
         ("Ausgangsrechnungen", {"outgoing_invoice", "outgoing_cancellation"}, "recipient"),
     ]:
         selected = sorted(
-            [d for d in docs if d["kind"] in kinds],
+            [d for d in docs if d["kind"] in kinds and not supplementary_receipt(d)],
             key=lambda d: (d["metadata"].get("date") or "", d["metadata"].get("number") or ""),
         )
         rows = []
@@ -314,6 +326,7 @@ def build_workbook(snapshot, package_id, version):
                     m.get("note", ""),
                     number(settlement.get("amount_due")),
                     number(settlement.get("covered_by_third_party")),
+                    d.get("category_name"),
                 ]
             )
         ws = table(wb, title, invoice_headers, rows)
@@ -507,6 +520,17 @@ def build_workbook(snapshot, package_id, version):
         d = documents.get(p["document_id"], {})
         m = d.get("metadata", {})
         settlement = m.get("settlement") or {}
+        if p.get("bank_evidence") == "disputed":
+            cases.append(
+                [
+                    p["period"],
+                    m.get("number"),
+                    "Bankdeckung strittig – Zuordnungsbetrag unverändert",
+                    "Bankidentität / Zahlungsnachweis prüfen; keine erneute Zahlung ableiten.",
+                    "Bearbeitung",
+                    "; ".join(p.get("assessment_notes") or []) or "Bankdeckung ist strittig.",
+                ]
+            )
         if settlement.get("review_note"):
             cases.append(
                 [
@@ -518,7 +542,7 @@ def build_workbook(snapshot, package_id, version):
                     settlement["review_note"],
                 ]
             )
-        elif p.get("status") != "paid" and not settlement_status(m):
+        elif p.get("bank_evidence") != "disputed" and p.get("status") != "paid" and not settlement_status(m):
             cases.append(
                 [
                     p["period"],
@@ -558,6 +582,7 @@ def build_workbook(snapshot, package_id, version):
             "Bytes",
             "Revision",
             "Dokumentkennung (technisch)",
+            "Kategorie",
         ],
         [
             [
@@ -570,6 +595,7 @@ def build_workbook(snapshot, package_id, version):
                 d["size"],
                 d["version"],
                 d["id"],
+                d.get("category_name"),
             ]
             for d in inventory
         ],

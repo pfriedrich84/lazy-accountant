@@ -129,6 +129,9 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         data = document_data(doc, names=names)
         if (
             doc.period in periods
+            and doc.status == "ready"
+            and not doc.issues
+            and data["filing_status"] == "done"
             and not doc.is_excluded
             and not doc.duplicate_of_id
             and doc.security_status == "clean"
