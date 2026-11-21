@@ -517,9 +517,10 @@ export default function Packages() {
               mt: 2,
             }}
           >
-            Enthalten sind Originale, CSV/XLSX, Begleitschreiben und
-            Inhaltsliste mit Prüfsummen. Alle vier Monatsordner bleiben
-            erhalten. Ein erzeugtes Paket ändert sich nicht mehr.
+            Neue Pakete enthalten Originale und eine Excel-Arbeitsmappe mit
+            acht Blättern einschließlich Zahlungszuordnungen, Bankbewegungen
+            und Inhaltsliste mit Originalprüfsummen. Alle vier Monatsordner
+            bleiben erhalten. Ein erzeugtes Paket ändert sich nicht mehr.
           </Typography>
         </Paper>
       )}

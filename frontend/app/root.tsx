@@ -18,6 +18,7 @@ import {
   createTheme,
 } from "@mui/material";
 import "./style.css";
+import faviconUrl from "./assets/favicon.svg?url";
 
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 15_000 } },
@@ -59,6 +60,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Lazy Accountant</title>
+        <link rel="icon" type="image/svg+xml" href={faviconUrl} />
         <Meta />
         <Links />
       </head>
