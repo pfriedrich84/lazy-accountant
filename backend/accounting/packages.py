@@ -252,7 +252,9 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     sources = {s["document_id"]: s for s in bank_export.pop("export_sources")}
     for doc in workbook_documents:
         sources[doc["id"]] = {"document_id": doc["id"], "sha256": doc["sha256"]}
+    source_bytes = check_source_budget(sources)
     return {
+        "source_bytes": source_bytes,
         "export_sources": list(sources.values()),
         "blocked_imports": import_errors(actor, company_id, include_excluded=False),
         "schema_version": 2,
@@ -281,6 +283,21 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         "max_package_bytes": settings.MAX_PACKAGE_BYTES,
         "by_kind": dict(Counter(d["kind"] for d in included)),
     }
+
+
+def check_source_budget(identifiers):
+    """Count distinct original dependencies, including unchanged/context-only sources."""
+    identifiers = set(identifiers)
+    if len(identifiers) > settings.MAX_PACKAGE_SOURCE_FILES:
+        raise DomainError("Zu viele Original-/Kontext-Quellen für das Paket; weniger Monate wählen.", 413)
+    size = Document.objects.filter(id__in=identifiers).aggregate(total=Sum("size", default=0))["total"]
+    if size > settings.MAX_PACKAGE_BYTES:
+        raise DomainError(
+            "Paket überschreitet das Verarbeitungsgrößenlimit einschließlich unveränderter und "
+            "historischer Quellen. Weniger Monate wählen oder MAX_PACKAGE_BYTES bewusst anpassen.",
+            413,
+        )
+    return size
 
 
 def bank_export_limit():
@@ -443,6 +460,11 @@ def freeze_bank_export(company_id, periods, payments):
 
 
 def build_archive(snapshot, package_id, version):
+    # Bound cumulative I/O before reading even one original, including supplements.
+    check_source_budget(
+        {d["id"] for d in snapshot["documents"]}
+        | {s["document_id"] for s in snapshot.get("export_sources", [])}
+    )
     # Context-only sources are still protected financial data, including in supplements.
     for source in snapshot.get("export_sources", []):
         doc = Document.objects.only("id", "sha256").get(id=source["document_id"])
@@ -588,6 +610,8 @@ def require_package_available(package):
 
 def require_package_safe(package):
     require_package_available(package)
+    expected = package_sources(package)
+    check_source_budget(expected)
     blockers = package_blockers(package)
     if blockers:
         raise DomainError(
@@ -600,12 +624,7 @@ def require_package_safe(package):
             },
         )
     # Includes later on-disk tampering, not just recorded scanner findings.
-    for doc in (
-        Document.objects.filter(id__in=package_sources(package))
-        .only("id")
-        .order_by("id")
-        .iterator(chunk_size=100)
-    ):
+    for doc in Document.objects.filter(id__in=expected).only("id").order_by("id").iterator(chunk_size=100):
         storage.read_original(doc)
 
 

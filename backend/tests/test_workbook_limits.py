@@ -96,6 +96,82 @@ def test_package_safety_paths_do_not_fetch_parser_blobs(actor, companies, phase)
         assert all('"accounting_packageitem"."metadata"' not in query["sql"] for query in queries)
 
 
+@pytest.mark.parametrize("phase", ["preview", "create", "download", "archive"])
+@pytest.mark.parametrize("limit", ["bytes", "count"])
+def test_cumulative_source_limits_precede_original_reads(
+    actor, companies, settings, monkeypatch, phase, limit
+):
+    from accounting import storage
+    from accounting.models import Document
+
+    source = statement(actor, companies[0])
+    normalize(actor, source, auto=False)
+    Document.objects.filter(id=source["id"]).update(period="2026-09")
+    inv = invoice(actor, companies[0])
+    assign(actor, BankTransaction.objects.get(), inv)
+    parent = packages.create_package(actor, companies[0].id, ["2026-10"], "source-budget-parent")
+    package = packages.get_package(actor, parent["id"])
+    if limit == "bytes":
+        settings.MAX_PACKAGE_BYTES = 1
+    else:
+        settings.MAX_PACKAGE_SOURCE_FILES = 1
+    monkeypatch.setattr(storage, "read_original", lambda doc: pytest.fail("must reject before original I/O"))
+    with pytest.raises(DomainError, match="Quellen") as exc:
+        if phase == "preview":
+            packages.package_preview(actor, companies[0].id, ["2026-10"], parent["id"])
+        elif phase == "create":
+            packages.create_package(
+                actor, companies[0].id, ["2026-10"], "source-budget-supplement", parent["id"]
+            )
+        elif phase == "download":
+            packages.package_bytes(package)
+        else:
+            packages.build_archive(package.snapshot, package.id, package.version)
+    assert exc.value.status == 413 and Package.objects.count() == 1
+
+
+def test_compose_forwards_custom_workbook_budgets_to_app_and_worker(tmp_path):
+    import json
+    import os
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    if not shutil.which("docker"):
+        pytest.skip("Docker Compose config validation runs in CI; no daemon required")
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            os.devnull,
+            "-f",
+            str(Path(__file__).resolve().parents[2] / "compose.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        env={
+            "PATH": os.environ.get("PATH", os.defpath),
+            "HOME": str(tmp_path),
+            "DJANGO_SECRET_KEY": "synthetic-config-key",
+            "ADMIN_PASSWORD": "synthetic-config-password",
+            "POSTGRES_PASSWORD": "synthetic-db-password",
+            "MAX_PACKAGE_SOURCE_FILES": "5678",
+            "MAX_WORKBOOK_BANK_ROWS": "1234",
+            "MAX_WORKBOOK_BANK_BYTES": "7654321",
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    configuration = json.loads(result.stdout)
+    for service in ("app", "worker"):
+        assert configuration["services"][service]["environment"]["MAX_PACKAGE_SOURCE_FILES"] == "5678"
+        assert configuration["services"][service]["environment"]["MAX_WORKBOOK_BANK_ROWS"] == "1234"
+        assert configuration["services"][service]["environment"]["MAX_WORKBOOK_BANK_BYTES"] == "7654321"
+
+
 def test_bank_projection_does_not_fetch_source_parser_blobs(actor, companies):
     inv = invoice(actor, companies[0])
     normalize(actor, statement(actor, companies[0]), auto=False)
