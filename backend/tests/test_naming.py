@@ -1,8 +1,6 @@
 """Synthetic metadata/bytes only; no production documents are used."""
 
-import csv
 import io
-import json
 import unicodedata
 import uuid
 import zipfile
@@ -338,16 +336,13 @@ def test_download_zip_csv_xlsx_manifest_and_immutable_snapshot(actor, companies,
     with zipfile.ZipFile(io.BytesIO(before)) as z:
         assert archive_path in z.namelist()
         assert z.read(archive_path) == response.content
-        base = f"{c.folder}/2026/10/"
-        rows = list(
-            csv.DictReader(io.StringIO(z.read(base + "Uebersicht.csv").decode("utf-8-sig")), delimiter=";")
-        )
-        assert rows[0]["file"] == archive_path
-        wb = load_workbook(io.BytesIO(z.read(base + "Uebersicht.xlsx")))
-        cells = list(wb.active.values)
-        assert cells[1][cells[0].index("file")] == archive_path
-        manifest = json.loads(z.read(base + "Inhaltsliste.json"))
-        assert next(x for x in manifest["files"] if x["path"] == archive_path)["sha256"] == d["sha256"]
+        wb = load_workbook(io.BytesIO(z.read(f"{c.folder}/Monatsuebersicht_2026-10.xlsx")))
+        cells = list(wb["Eingangsrechnungen"].iter_rows(min_row=5, values_only=True))
+        relative = f"2026/10/ER/{expected}"
+        assert cells[1][cells[0].index("Originalbeleg")] == relative
+        assert unquote(wb["Eingangsrechnungen"].cell(6, 18).hyperlink.target) == relative
+        inventory = list(wb["Inhaltsliste"].iter_rows(min_row=5, values_only=True))
+        assert next(row for row in inventory[1:] if row[4] == relative)[5] == d["sha256"]
     changed = name_changes.set_name(actor, d["id"], d["version"], "Manuelle Übergabe.pdf")
     assert changed["status"] == "ready" and changed["issues"] == []
     for field in ["original_name", "sha256", "filed_path", "related_ids", "metadata"]:

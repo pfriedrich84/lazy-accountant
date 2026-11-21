@@ -121,11 +121,22 @@ def test_removal_serializes_with_package_users(user, actor, companies, operation
         assert not package_removal.PackageRemoval.objects.exists()
 
 
-def test_parent_download_and_supplement_build_do_not_deadlock(user, actor, companies):
+@pytest.mark.parametrize("historical_source", [False, True])
+def test_parent_download_and_supplement_build_do_not_deadlock(user, actor, companies, historical_source):
     if connection.vendor != "postgresql":
         pytest.skip("Requires PostgreSQL row locks")
     company = companies[0]
-    seed_month(user, company, classified=True)
+    if historical_source:
+        from accounting.models import BankTransaction, Document
+        from test_reconciliation import assign, invoice, normalize, statement
+
+        source = statement(actor, company)
+        normalize(actor, source, auto=False)
+        Document.objects.filter(id=source["id"]).update(period="2026-09")
+        current_invoice = invoice(actor, company)
+        assign(actor, BankTransaction.objects.get(), current_invoice)
+    else:
+        seed_month(user, company, classified=True)
     data = packages.create_package(actor, company.id, ["2026-10"], "parent")
     package = Package.objects.get(pk=data["id"])
     entered, release = Event(), Event()
@@ -153,7 +164,8 @@ def test_parent_download_and_supplement_build_do_not_deadlock(user, actor, compa
         try:
             assert entered.wait(10)
             downloading = pool.submit(in_connection, download)
-            # Download holds the parent package lock and waits for a document.
+            # A download must wait without inverting the builder's source locks,
+            # including historical sources created before the current invoice.
             wait_for_lock(download_pid.get(timeout=10))
         finally:
             release.set()

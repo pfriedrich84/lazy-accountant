@@ -373,8 +373,8 @@ def test_bank_reversal_retains_both_currency_amounts(actor, companies):
 
 def test_fx_snapshot_supplement_is_frozen_and_exports_evidence(actor, companies):
     import io
-    import json
     import zipfile
+    from openpyxl import load_workbook
     from accounting import packages
 
     company = companies[0]
@@ -389,12 +389,15 @@ def test_fx_snapshot_supplement_is_frozen_and_exports_evidence(actor, companies)
     with zipfile.ZipFile(
         io.BytesIO(packages.package_bytes(packages.get_package(actor, after["id"])))
     ) as archive:
-        exported = json.loads(archive.read(f"{company.folder}/2026/10/Zahlungsstand.json"))
-        assert exported["schema_version"] == 2
-        payment = exported["payments"][0]
-        assert payment["status"] == "paid"
-        assert Decimal(payment["allocations"][0]["bank_amount"]) == 56
-        assert payment["allocations"][0]["evidence"]["fx"]["evidence"]["quote"] == TEXT
+        wb = load_workbook(io.BytesIO(archive.read(f"{company.folder}/Monatsuebersicht_2026-10.xlsx")))
+        rows = list(wb["Zahlungszuordnungen"].iter_rows(min_row=5, values_only=True))
+        assert rows[1][6] == 60  # invoice USD
+        assert rows[1][8] == 55  # EUR principal
+        assert rows[1][9] == 1  # separate fee
+        assert rows[1][10] == 56  # entire EUR bank debit
+        assert rows[1][13] == "Bestätigt"
+        assert rows[1][17] == TEXT
+        payment = after["snapshot"]["payments"][0]
         assert payment["revision"] == bank.payment_status(actor, inv["id"])["revision"]
     assert packages.package_bytes(packages.get_package(actor, before["id"])) == frozen
 

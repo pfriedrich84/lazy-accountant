@@ -156,7 +156,13 @@ def read_original(doc):
     from .security import invalidate, require_clean
 
     with transaction.atomic():
-        doc = Document.objects.select_for_update().get(id=doc.id)
+        doc = (
+            Document.objects.select_for_update()
+            .only(
+                "id", "security_status", "security_error", "sha256", "scanned_sha256", "original_path", "size"
+            )
+            .get(id=doc.id)
+        )
         require_clean(doc)
         try:
             data = path(doc.original_path).read_bytes()

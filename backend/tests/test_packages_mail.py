@@ -1,5 +1,4 @@
 import io
-import json
 import smtplib
 import zipfile
 from datetime import date, timedelta
@@ -9,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from django.core import mail as django_mail
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from accounting import jobs, mail, packages, services, storage
 from accounting.auth import DomainError
@@ -45,12 +45,12 @@ def test_full_month_export_and_immutable_corrections(user, actor, companies):
         assert sum(n.endswith("/konto.xml") for n in z.namelist()) == 0  # collision-safe ID prefix
         for item in package.items.all():
             assert storage.checksum(z.read(item.archive_path)) == item.sha256
-        base = f"{c.folder}/2026/10/"
-        for generated in ("Uebersicht.csv", "Uebersicht.xlsx", "Begleitschreiben.txt", "Inhaltsliste.json"):
-            assert base + generated in z.namelist()
-        manifest = json.loads(z.read(base + "Inhaltsliste.json"))
-        for item in manifest["files"]:
-            assert storage.checksum(z.read(item["path"])) == item["sha256"]
+        name = f"{c.folder}/Monatsuebersicht_2026-10.xlsx"
+        assert [n for n in z.namelist() if n.endswith(".xlsx")] == [name]
+        wb = load_workbook(io.BytesIO(z.read(name)))
+        rows = list(wb["Inhaltsliste"].iter_rows(min_row=6, values_only=True))
+        for row in rows:
+            assert storage.checksum(z.read(f"{c.folder}/{row[4]}")) == row[5]
     doc = services.document_data(Document.objects.get(id=ids[0]), True)
     services.save_result(
         actor,

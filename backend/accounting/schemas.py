@@ -54,6 +54,79 @@ class Evidence(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class SettlementInfo(BaseModel):
+    """Original invoice facts / explicit review notes, never a payment allocation."""
+
+    model_config = ConfigDict(extra="forbid")
+    amount_due: Decimal | None = None
+    covered_by_third_party: Decimal | None = Field(default=None, ge=0)
+    review_note: str = Field(default="", max_length=2000)
+    next_step: str = Field(default="", max_length=1000)
+    follow_up: str = Field(default="", max_length=300)
+
+    @field_validator("amount_due", "covered_by_third_party", mode="before")
+    @classmethod
+    def decimal_input(cls, value):
+        return TaxLine.decimal_input(value)
+
+    @field_validator("amount_due", "covered_by_third_party")
+    @classmethod
+    def finite(cls, value):
+        return TaxLine.finite(value)
+
+
+class SecurityIncome(BaseModel):
+    """Explicit securities statement values, not VAT and not an inferred bank match."""
+
+    model_config = ConfigDict(extra="forbid")
+    quantity: Decimal | None = None
+    original_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    bank_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    gross: Decimal | None = None
+    withholding_tax: Decimal | None = None
+    net: Decimal | None = None
+    bank_net: Decimal | None = None
+    bank_fee: Decimal | None = None
+    bank_credit: Decimal | None = None
+    rate_original_per_bank: Decimal | None = Field(default=None, gt=0)
+
+    @field_validator("original_currency", "bank_currency")
+    @classmethod
+    def iso_currency(cls, value):
+        if value is not None:
+            Currency(value)
+        return value
+
+    @field_validator(
+        "quantity",
+        "gross",
+        "withholding_tax",
+        "net",
+        "bank_net",
+        "bank_fee",
+        "bank_credit",
+        "rate_original_per_bank",
+        mode="before",
+    )
+    @classmethod
+    def decimal_input(cls, value):
+        return TaxLine.decimal_input(value)
+
+    @field_validator(
+        "quantity",
+        "gross",
+        "withholding_tax",
+        "net",
+        "bank_net",
+        "bank_fee",
+        "bank_credit",
+        "rate_original_per_bank",
+    )
+    @classmethod
+    def finite(cls, value):
+        return TaxLine.finite(value)
+
+
 class Metadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
     issuer: str | None = Field(default=None, max_length=300)
@@ -71,6 +144,8 @@ class Metadata(BaseModel):
     tax: Decimal | None = None
     gross: Decimal | None = None
     taxes: list[TaxLine] = Field(default_factory=list, max_length=100)
+    settlement: SettlementInfo | None = None
+    security_income: SecurityIncome | None = None
     subtype: str | None = Field(default=None, max_length=100)
     confirmed_partner_name: str | None = Field(default=None, max_length=300)
     bank_short_name: str | None = Field(default=None, max_length=100)

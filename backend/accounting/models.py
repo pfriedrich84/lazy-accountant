@@ -275,6 +275,18 @@ class Package(models.Model):
         ]
 
 
+class PackageContextSource(models.Model):
+    """Indexed dependency, not an original included in the ZIP. Hashes stay in the snapshot."""
+
+    package = models.ForeignKey(Package, on_delete=models.PROTECT, related_name="context_sources")
+    document = models.ForeignKey(Document, on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["package", "document"], name="unique_package_context_source")
+        ]
+
+
 class PackageRemoval(models.Model):
     package = models.OneToOneField(Package, on_delete=models.PROTECT, related_name="removal")
     company = models.ForeignKey(Company, on_delete=models.PROTECT)
