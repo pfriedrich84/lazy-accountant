@@ -97,6 +97,44 @@ def test_identically_named_accounts_have_distinct_totals():
     assert "SYNTHETIC-A" in str(credits) and "SYNTHETIC-B" in str(credits)
 
 
+def test_pdf_only_statement_keeps_account_currency_and_coverage():
+    doc = synthetic_document(
+        "pdf-statement", kind="bank_pdf", period_start="2026-10-01", period_end="2026-10-31"
+    )
+    doc.update(account_name="Synthetic operating account", account_identifier="SYNTHETIC-ACCOUNT")
+    wb = render(base_snapshot([doc]))
+    assert not rows(wb["Bankbewegungen"])
+    entry = rows(wb["Inhaltsliste"])[0]
+    assert entry["Konto / Depot"] == "Synthetic operating account"
+    assert entry["Kennung Konto / Depot"] == "SYNTHETIC-ACCOUNT"
+    assert entry["Währung"] == "EUR"
+    assert entry["Leistungs-/Auszugsbeginn"].day == 1
+    assert entry["Leistungs-/Auszugsende"].day == 31
+
+
+@pytest.mark.parametrize("kind", ["incoming_credit", "outgoing_cancellation", "receipt", "incoming_invoice"])
+def test_explicit_followup_does_not_require_invoice_payment_status(kind):
+    doc = synthetic_document(
+        "followup",
+        kind=kind,
+        settlement={
+            "review_note": "Synthetic credit clarification",
+            "next_step": "Wait for correction",
+            "follow_up": "Next month",
+        },
+    )
+    snapshot = base_snapshot([doc])
+    if kind == "incoming_invoice":
+        snapshot["payments"] = [
+            {"document_id": doc["id"], "period": "2026-10", "status": "unpaid", "allocations": []}
+        ]
+    cases = rows(render(snapshot)["Klärfälle"])
+    assert len(cases) == 1
+    assert cases[0]["Hinweise"] == "Synthetic credit clarification"
+    assert cases[0]["Nächster Schritt"] == "Wait for correction"
+    assert cases[0]["Zuständig"] == "Next month"
+
+
 def test_manually_assigned_categories_survive_in_the_workbook():
     doc = synthetic_document("categorized")
     doc["category_name"] = "Synthetic business category"

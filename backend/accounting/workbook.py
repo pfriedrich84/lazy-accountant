@@ -516,10 +516,25 @@ def build_workbook(snapshot, package_id, version):
                     "Nicht im Paket enthalten",
                 ]
             )
-    for p in payments.values():
-        d = documents.get(p["document_id"], {})
-        m = d.get("metadata", {})
+    # Explicit follow-ups also apply to credits, cancellations and standalone receipts,
+    # which intentionally have no invoice-payment status.
+    for d in docs:
+        m = d["metadata"]
         settlement = m.get("settlement") or {}
+        if settlement.get("review_note"):
+            cases.append(
+                [
+                    d["period"],
+                    m.get("number"),
+                    "Wiedervorlage – keine Zahlungsaufforderung",
+                    settlement.get("next_step") or "Weitere Abrechnung / Nachweis abwarten",
+                    settlement.get("follow_up") or "Bearbeitung bei neuen Unterlagen",
+                    settlement["review_note"],
+                ]
+            )
+    for p in payments.values():
+        d = documents[p["document_id"]]
+        m = d["metadata"]
         if p.get("bank_evidence") == "disputed":
             cases.append(
                 [
@@ -531,18 +546,7 @@ def build_workbook(snapshot, package_id, version):
                     "; ".join(p.get("assessment_notes") or []) or "Bankdeckung ist strittig.",
                 ]
             )
-        if settlement.get("review_note"):
-            cases.append(
-                [
-                    p["period"],
-                    m.get("number"),
-                    "Wiedervorlage – keine Zahlungsaufforderung",
-                    settlement.get("next_step") or "Weitere Abrechnung / Nachweis abwarten",
-                    settlement.get("follow_up") or "Bearbeitung bei neuen Unterlagen",
-                    settlement["review_note"],
-                ]
-            )
-        elif p.get("bank_evidence") != "disputed" and p.get("status") != "paid" and not settlement_status(m):
+        elif p.get("status") != "paid" and not settlement_status(m):
             cases.append(
                 [
                     p["period"],
@@ -583,6 +587,13 @@ def build_workbook(snapshot, package_id, version):
             "Revision",
             "Dokumentkennung (technisch)",
             "Kategorie",
+            "Konto / Depot",
+            "Kennung Konto / Depot",
+            "Währung",
+            "Datum",
+            "Leistungs-/Auszugsbeginn",
+            "Leistungs-/Auszugsende",
+            "Monatszuordnung / Begründung",
         ],
         [
             [
@@ -596,6 +607,13 @@ def build_workbook(snapshot, package_id, version):
                 d["version"],
                 d["id"],
                 d.get("category_name"),
+                d.get("account_name"),
+                d.get("account_identifier"),
+                d["metadata"].get("currency"),
+                day(d["metadata"].get("date")),
+                day(d["metadata"].get("period_start")),
+                day(d["metadata"].get("period_end")),
+                d["metadata"].get("period_assignment_reason"),
             ]
             for d in inventory
         ],
