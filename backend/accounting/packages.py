@@ -1,8 +1,6 @@
 import copy
-import csv
 import io
 import json
-import re
 import uuid
 import zipfile
 from collections import Counter
@@ -10,35 +8,12 @@ from collections import Counter
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Max, Q
-from openpyxl import Workbook
+from django.utils import timezone
 
-from . import naming, storage
+from . import naming, storage, workbook
 from .auth import DomainError
-from .models import Document, FileOperation, Package, PackageItem, PackageRemoval
+from .models import BankTransaction, Document, FileOperation, Package, PackageItem, PackageRemoval
 from .services import document_data, valid_period
-
-COLUMNS = [
-    "id",
-    "revision",
-    "kind",
-    "period",
-    "date",
-    "period_start",
-    "period_end",
-    "period_assignment_reason",
-    "number",
-    "issuer",
-    "recipient",
-    "account",
-    "account_identifier",
-    "category",
-    "net",
-    "tax",
-    "gross",
-    "currency",
-    "file",
-    "sha256",
-]
 
 
 def package_data(p, detailed=False):
@@ -58,7 +33,11 @@ def package_data(p, detailed=False):
         data["snapshot"] = copy.deepcopy(p.snapshot)
         data["items"] = list(p.items.values("document_id", "revision", "archive_path", "sha256", "metadata"))
         exclusions = data["snapshot"]["excluded"] + data["snapshot"].get("intentional_exclusions", [])
-        documents = data["snapshot"]["documents"] + [e["document"] for e in exclusions]
+        documents = (
+            data["snapshot"]["documents"]
+            + [e["document"] for e in exclusions]
+            + data["snapshot"].get("workbook_documents", [])
+        )
         blocked_ids = {
             str(identifier)
             for identifier in Document.objects.filter(
@@ -68,6 +47,11 @@ def package_data(p, detailed=False):
             .values_list("id", flat=True)
         }
         blocked_ids.update(entry["document_id"] for entry in data["security_blocked"])
+        if blocked_ids:
+            # New workbook context may include historical bank sources not shipped as originals.
+            # Fail closed rather than expose their remittance/FX text through snapshot metadata.
+            for key in ("bank_transactions", "allocation_transactions", "payments"):
+                data["snapshot"][key] = []
         for document in documents:
             if document["id"] in blocked_ids:
                 document.update(
@@ -139,9 +123,25 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     docs = list(docs)
     names = naming.resolve(naming.context_many(docs))
     included, excluded, unchanged, blocked = [], [], [], []
+    workbook_documents = []
     intentional_exclusions, exclusion_changes, document_states = [], [], []
     for doc in docs:
         data = document_data(doc, names=names)
+        if (
+            doc.period in periods
+            and not doc.is_excluded
+            and not doc.duplicate_of_id
+            and doc.security_status == "clean"
+            and doc.scanned_sha256 == doc.sha256
+        ):
+            workbook_documents.append(
+                {
+                    **data,
+                    "account_name": doc.account.name if doc.account_id else "",
+                    "account_identifier": doc.account.identifier if doc.account_id else "",
+                    "category_name": doc.category.name if doc.category_id else "",
+                }
+            )
         previous = known.get(str(doc.id))
         document_states.append(
             {
@@ -232,7 +232,12 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         pass
     from .mail import import_errors
 
+    bank_export = freeze_bank_export(company.id, periods, payments)
+    sources = {s["document_id"]: s for s in bank_export.pop("export_sources")}
+    for doc in workbook_documents:
+        sources[doc["id"]] = {"document_id": doc["id"], "sha256": doc["sha256"]}
     return {
+        "export_sources": list(sources.values()),
         "blocked_imports": import_errors(actor, company_id, include_excluded=False),
         "schema_version": 2,
         "company": {"id": company.id, "name": company.name, "folder": company.folder},
@@ -242,6 +247,9 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
         "allow_open_issues": company.allow_open_issues,
         "documents": included,
         "payment_schema_version": 2,
+        "export_schema_version": 1,
+        "workbook_documents": workbook_documents,
+        **bank_export,
         "payments": payments,
         "payment_changes": payment_changes,
         "excluded": excluded,
@@ -259,145 +267,93 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     }
 
 
-def spreadsheet_safe(value):
-    value = "" if value is None else str(value)
-    if re.fullmatch(r"-?[0-9]+(?:\.[0-9]+)?", value):
-        return value
-    return "'" + value if value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")) else value
+def freeze_bank_export(company_id, periods, payments):
+    """Capture both month movements and historical evidence for current invoice allocations.
 
+    Called under the package writer's company lock. No live bank reads in the renderer.
+    Security guards are shared with reconciliation, including merged observations.
+    """
+    from .reconciliation import _all_bank_sources, _require_clean_document, transaction_data
 
-def overview_row(d):
-    m = d["metadata"]
-    values = {
-        "id": d["id"],
-        "revision": d["version"],
-        "kind": d["kind"],
-        "period": d["period"],
-        "file": d["archive_path"],
-        "sha256": d["sha256"],
-        "account": d["account_name"],
-        "account_identifier": d["account_identifier"],
-        "category": d["category_name"],
-        **m,
+    allocated_ids = {a["transaction_id"] for p in payments for a in p.get("allocations", [])}
+    selected = Q(id__in=allocated_ids)
+    for period in periods:
+        year, month = map(int, period.split("-"))
+        selected |= Q(booking_date__year=year, booking_date__month=month)
+    transactions = (
+        BankTransaction.objects.filter(company_id=company_id, merged_into__isnull=True)
+        .filter(selected)
+        .select_related("account", "merged_into", "identity_resolution")
+        .prefetch_related(
+            "sources__document", "merged_duplicates__sources__document", "allocations__document"
+        )
+        .order_by("booking_date", "id")
+    )
+    monthly, allocated, notes, sources = [], [], [], {}
+    for tx in transactions:
+        if tx.account.company_id != company_id:
+            raise DomainError("Firmenfremdes Bankkonto; Export gesperrt.", 409)
+        # A stored source exclusion is not undone by generating a workbook.
+        if any(source.document.is_excluded for source in _all_bank_sources(tx)):
+            if str(tx.id) in allocated_ids:
+                raise DomainError("Zahlungsquelle ist ausgeschlossen; Zuordnung vor Export prüfen.", 409)
+            notes.append("Eine Bankbewegung mit ausgeschlossener Quelle wurde nicht exportiert.")
+            continue
+        data = transaction_data(tx)
+        for source in _all_bank_sources(tx):
+            sources[str(source.document_id)] = {
+                "document_id": str(source.document_id),
+                "sha256": source.document.sha256,
+            }
+        data.update(
+            value_date=tx.value_date.isoformat() if tx.value_date else None,
+            account_name=tx.account.name,
+            account_identifier=tx.account.identifier,
+            invoice_references=[],
+        )
+        for allocation in tx.allocations.all():
+            doc = allocation.document
+            if doc.company_id != company_id:
+                raise DomainError("Firmenfremde Zahlungszuordnung; Export gesperrt.", 409)
+            _require_clean_document(doc)
+            sources[str(doc.id)] = {"document_id": str(doc.id), "sha256": doc.sha256}
+            if not allocation.reversed_at and not doc.is_excluded:
+                data["invoice_references"].append(doc.metadata.get("number") or "Rechnung ohne Nummer")
+        # transaction_data contains UUID source IDs; snapshots are JSON-serializable.
+        data = json.loads(json.dumps(data, default=str))
+        if data["booking_date"] and data["booking_date"][:7] in periods:
+            monthly.append(data)
+        if str(tx.id) in allocated_ids:
+            allocated.append(data)
+    return {
+        "bank_transactions": monthly,
+        "allocation_transactions": allocated,
+        "bank_export_notes": notes,
+        "export_sources": list(sources.values()),
     }
-    return [spreadsheet_safe(values.get(c)) for c in COLUMNS]
 
 
 def build_archive(snapshot, package_id, version):
+    # Context-only sources are still protected financial data, including in supplements.
+    for source in snapshot.get("export_sources", []):
+        doc = Document.objects.get(id=source["document_id"])
+        if doc.sha256 != source["sha256"]:
+            raise DomainError("Exportquelle wurde verändert.", 409)
+        storage.read_original(doc)
     files = {}
-    originals = {}
     for d in snapshot["documents"]:
         doc = Document.objects.get(id=d["id"])
         data = storage.read_original(doc)
         if d["archive_path"] in files:
             raise DomainError("Doppelter Übergabepfad im Snapshot; kein Überschreiben erlaubt.", 409)
         files[d["archive_path"]] = data
-        originals[d["archive_path"]] = {
-            "document_id": d["id"],
-            "revision": d["version"],
-            "sha256": d["sha256"],
-        }
     folder = snapshot["company"]["folder"]
     for period in snapshot["periods"]:
         year, month = period.split("-")
         base = f"{folder}/{year}/{month}"
         for category in storage.FOLDERS:
             files[f"{base}/{category}/"] = b""
-        docs = [d for d in snapshot["documents"] if d["period"] == period]
-        text = io.StringIO(newline="")
-        writer = csv.writer(text, delimiter=";")
-        writer.writerow(COLUMNS)
-        writer.writerows(overview_row(d) for d in docs)
-        files[f"{base}/Uebersicht.csv"] = b"\xef\xbb\xbf" + text.getvalue().encode("utf-8")
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Unterlagen"
-        ws.append(COLUMNS)
-        for d in docs:
-            ws.append(overview_row(d))
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
-        stream = io.BytesIO()
-        wb.save(stream)
-        files[f"{base}/Uebersicht.xlsx"] = stream.getvalue()
-        # Separate payment overview also captures payment-only supplements without duplicating originals.
-        payments = [p for p in snapshot.get("payments", []) if p["period"] == period]
-        if payments:
-            columns = [
-                "document_id",
-                "document_version",
-                "as_of",
-                "status",
-                "currency",
-                "gross",
-                "paid",
-                "remaining",
-                "due_date",
-                "overdue",
-                "bank_evidence",
-                "revision",
-            ]
-            payment_text = io.StringIO(newline="")
-            writer = csv.writer(payment_text, delimiter=";")
-            writer.writerow(columns)
-            wb_payments = Workbook()
-            ws_payments = wb_payments.active
-            ws_payments.title = "Zahlungsstand"
-            ws_payments.append(columns)
-            for payment in payments:
-                row = [spreadsheet_safe(payment.get(c)) for c in columns]
-                writer.writerow(row)
-                ws_payments.append(row)
-            files[f"{base}/Zahlungsstand.csv"] = b"\xef\xbb\xbf" + payment_text.getvalue().encode("utf-8")
-            payment_stream = io.BytesIO()
-            wb_payments.save(payment_stream)
-            files[f"{base}/Zahlungsstand.xlsx"] = payment_stream.getvalue()
-            files[f"{base}/Zahlungsstand.json"] = json.dumps(
-                {
-                    "schema_version": snapshot.get("payment_schema_version", 1),
-                    "payments": payments,
-                    "changed_ids": [
-                        p["document_id"]
-                        for p in payments
-                        if p["document_id"] in snapshot.get("payment_changes", [])
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ).encode()
-        notes = "\n".join(f"- {e['document']['original_name']}: {e['reason']}" for e in snapshot["excluded"])
-        intentional = "\n".join(
-            f"- {e['document']['original_name']} ("
-            f"{e['document']['period'] or 'ohne Monatszuordnung'}): {e['reason']}"
-            for e in snapshot.get("intentional_exclusions", [])
-        )
-        changes = "\n".join(
-            f"- {e['document_id']}: {e['action']} v{e['old_revision']} → v{e['new_revision']}; "
-            f"{e['reason']} (Vorgängerpaket {e['previous_package_id']})"
-            for e in snapshot.get("exclusion_changes", [])
-        )
-        body = (
-            f"Unterlagen für {snapshot['company']['name']} – {period}\nPaket {package_id}, Version {version}\n"
-            f"Nachtrag zu: {snapshot['parent_id'] or 'keinem Vorgänger'}\nEmpfänger: {', '.join(snapshot['recipients'])}\n"
-            f"{len(docs)} Originale enthalten. Unveränderte Dokumente aus Vorgängern: {len(snapshot['unchanged'])}.\n"
-            f"Offene/prüfbedingt ausgeschlossene Unterlagen:\n{notes or 'Keine'}\n"
-            f"Bewusst ausgeschlossene Nichtbelege (nicht enthalten, nicht blockierend):\n{intentional or 'Keine'}\n"
-            f"Ausschluss-/Wiederherstellungsänderungen zum Vorgänger:\n{changes or 'Keine'}\n"
-            "Alte Pakete und bereits übergebene Originale bleiben unverändert.\n"
-            f"Nicht zugeordnete Eingangsdokumente: {len(snapshot['unassigned_inbox'])}\n"
-            "Dies ist eine Unterlagensammlung, keine bestätigte Buchhaltung.\n"
-        )
-        files[f"{base}/Begleitschreiben.txt"] = body.encode()
-        manifest = [
-            {"path": name, "sha256": storage.checksum(data), "bytes": len(data), **originals.get(name, {})}
-            for name, data in sorted(files.items())
-            if name.startswith(base + "/") and not name.endswith("/")
-        ]
-        files[f"{base}/Inhaltsliste.json"] = json.dumps(
-            {"package_id": str(package_id), "version": version, "files": manifest},
-            ensure_ascii=False,
-            indent=2,
-        ).encode()
+    files[workbook.workbook_name(snapshot)] = workbook.build_workbook(snapshot, package_id, version)
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for name, data in sorted(files.items()):
@@ -430,6 +386,7 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
             storage.reconcile(document_id)
         snapshot = package_preview(actor, company_id, periods, parent_id, lock=True)
         snapshot.pop("excluded_inbox", None)
+        snapshot["exported_at"] = timezone.now().isoformat()
         if snapshot["bytes"] > settings.MAX_PACKAGE_BYTES:
             raise DomainError(
                 "Paket überschreitet das konfigurierte Verarbeitungsgrößenlimit. Weniger Monate auswählen oder das Betriebslimit bewusst anpassen.",
@@ -471,20 +428,33 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
     return package_data(p, True)
 
 
+def package_sources(package):
+    expected = {str(item.document_id): item.sha256 for item in package.items.all()}
+    expected.update({s["document_id"]: s["sha256"] for s in package.snapshot.get("export_sources", [])})
+    return expected
+
+
 def package_blockers(package):
-    return [
-        {
-            "document_id": str(item.document_id),
-            "reason": item.document.security_error
-            or (
-                item.document.security_status
-                if item.document.security_status != "clean"
-                else "Freigegebener Hash stimmt nicht mit Paket überein"
-            ),
-        }
-        for item in package.items.select_related("document")
-        if item.document.security_status != "clean" or item.document.scanned_sha256 != item.sha256
-    ]
+    expected = package_sources(package)
+    documents = {str(d.id): d for d in Document.objects.filter(id__in=expected)}
+    blockers = []
+    for identifier, sha256 in expected.items():
+        doc = documents.get(identifier)
+        if doc is None:
+            blockers.append({"document_id": identifier, "reason": "Exportquelle fehlt"})
+        elif doc.security_status != "clean" or doc.scanned_sha256 != sha256 or doc.sha256 != sha256:
+            blockers.append(
+                {
+                    "document_id": identifier,
+                    "reason": doc.security_error
+                    or (
+                        doc.security_status
+                        if doc.security_status != "clean"
+                        else "Freigegebener Hash stimmt nicht mit Paket überein"
+                    ),
+                }
+            )
+    return blockers
 
 
 def require_package_available(package):
@@ -506,8 +476,8 @@ def require_package_safe(package):
             },
         )
     # Includes later on-disk tampering, not just recorded scanner findings.
-    for item in package.items.select_related("document"):
-        storage.read_original(item.document)
+    for doc in Document.objects.filter(id__in=package_sources(package)):
+        storage.read_original(doc)
 
 
 def package_bytes(package):

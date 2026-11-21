@@ -18,5 +18,12 @@ var/
 *.log
 backups/
 
+# Private agent state and generated accounting artifacts must stay local.
+.pi/
+exports/
+*.xlsx
+*.xls
+*.zip
+
 # Local runtime state from the globally installed design skill.
 .impeccable/

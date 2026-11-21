@@ -1,4 +1,3 @@
-import csv
 import io
 import ssl
 import threading
@@ -299,13 +298,12 @@ def test_csv_xlsx_formula_safety_and_original_negative_amounts(actor, companies)
     )
     p = packages.create_package(actor, c.id, ["2026-10"], "csv-safety")
     with zipfile.ZipFile(storage.path("_packages/" + p["id"] + ".zip")) as archive:
-        csv_name = next(n for n in archive.namelist() if n.endswith("Uebersicht.csv"))
-        rows = list(csv.DictReader(io.StringIO(archive.read(csv_name).decode("utf-8-sig")), delimiter=";"))
-        assert rows[0]["issuer"].startswith("'=WEBSERVICE")
-        assert rows[0]["gross"] == "-120.00"
-        xlsx_name = next(n for n in archive.namelist() if n.endswith("Uebersicht.xlsx"))
+        xlsx_name = next(n for n in archive.namelist() if n.endswith(".xlsx"))
         workbook = load_workbook(io.BytesIO(archive.read(xlsx_name)))
-        assert not any(cell.data_type == "f" for row in workbook.active for cell in row)
+        rows = list(workbook["Eingangsrechnungen"].iter_rows(min_row=5, values_only=True))
+        assert rows[1][2] == '=WEBSERVICE("https://untrusted.invalid")'
+        assert rows[1][12] == -120
+        assert not any(cell.data_type == "f" for sheet in workbook for row in sheet for cell in row)
 
 
 def test_pending_filing_visible_and_integrity_repair(actor, companies):

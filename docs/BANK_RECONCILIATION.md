@@ -26,7 +26,7 @@ Dies ist ein erster, separat prüfbarer Implementierungsstand, **keine vollstän
 - Manuelle Aufhebung mit Zeitpunkt, Benutzer und Grund. Reimport stellt eine aufgehobene Zuordnung nicht still wieder her. Zuordnungen speichern ursprüngliche Dokument-/Bankversion, Quellen-IDs, Freigabe-IDs und Regelversion.
 - Unabhängige Projektion `unpaid/partially_paid/paid/unresolved`, Restbetrag, Fälligkeit, `overdue=true/false/null`, Bankdeckung `none/partial/complete/unknown/disputed` und Berechnungsstichtag. Fehlende Fälligkeit ist ungeklärt; am Fälligkeitstag noch nicht überfällig. Datenstand bedeutet nicht, dass außerhalb des vorhandenen Bankbestands keine Zahlung erfolgt ist.
 - UI: firmenweiter Zahlungsstand und Bankbewegungsliste, getrennte Hinweise/Referenztreffer, Dokumentdetail mit Quellen, Zuordnung/Aufhebung, Admin-Bankdatenverifikation und CAMT-Abgleich. Listen sind paginiert; Filter/Suche wirken firmenweit vor der Seiteneinteilung. Die UI setzt die Position bei Filter-, Ansichts- und Firmenwechsel zurück.
-- Neue Pakete enthalten eingefrorene `Zahlungsstand.csv`, `.xlsx`, `.json`. Zahlungsänderungen erscheinen als `payment_changes` auch im Nachtrag bei unveränderter Dokumentrevision und ohne erneute Originaldatei. Alte ZIPs und Snapshots bleiben bytegleich.
+- Neue Pakete enthalten eine eingefrorene [Excel-Arbeitsmappe](HANDOVER_WORKBOOK.md) mit Rechnungs-, Zahlungszuordnungs- und Bankblättern statt separater Zahlungsstand-Dateien. Zahlungsänderungen erscheinen als `payment_changes` auch im Nachtrag bei unveränderter Dokumentrevision und ohne erneute Originaldatei. Alte ZIPs und Snapshots bleiben bytegleich.
 
 ### Gemeinsame Referenz für Zinsen und Kontogebühren
 

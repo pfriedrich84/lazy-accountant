@@ -46,7 +46,7 @@ Ein erster CAMT-basierter Zahlungsstand für importierte Ein- und Ausgangsrechnu
    Firma/Jahr/Monat/Wertpapiere/
    ```
 
-5. Unter **Übergabe & Versand** Vorschau prüfen und Paket verbindlich erzeugen. ZIP enthält Originale, CSV, XLSX, Begleitschreiben und Inhaltsliste mit Prüfsummen. Fehlende/ausgeschlossene Unterlagen und Empfänger bleiben sichtbar.
+5. Unter **Übergabe & Versand** Vorschau prüfen und Paket verbindlich erzeugen. ZIP enthält Originale und eine Excel-Arbeitsmappe mit acht Blättern einschließlich Zahlungszuordnungen, Bankbewegungen und Inhaltsliste mit Originalprüfsummen. [Format und Grenzen](docs/HANDOVER_WORKBOOK.md). Fehlende/ausgeschlossene Unterlagen und Empfänger bleiben sichtbar.
 6. Optional unter **Einstellungen → IMAP & SMTP** das Belegpostfach samt Importbeginn einrichten und **nächtlichen IMAP-Abruf** aktivieren. Automatischer Start einmal pro Nacht ab **03:00 Uhr Europe/Vienna**; große Rückstände werden in begrenzten Teilabrufen abgearbeitet. Manueller Abruf bleibt jederzeit möglich. Importierte Anhänge starten noch keinen KI-Agenten automatisch.
 7. SMTP konfigurieren und den gespeicherten Snapshot ausdrücklich versenden. `SMTP angenommen` ist **keine bestätigte Zustellung**. Ein unbekannter Ausgang wird nicht automatisch erneut gesendet; Neuversand ist eine erkennbare, protokollierte Aktion.
 
@@ -59,7 +59,7 @@ Ein erster CAMT-basierter Zahlungsstand für importierte Ein- und Ausgangsrechnu
 
 Originalbytes bleiben unverändert; Ausleseergebnisse sind getrennte, revisionsgeschützte Metadaten. Monatskorrekturen ändern die echte Ablage, aber niemals bereits erzeugte Paket-Snapshots. Nachträge verweisen auf Vorgänger und berücksichtigen deren Revisionsstände.
 
-**Lesbare Übergabenamen** werden separat aus strukturierten Belegdaten erzeugt und für neue ZIPs, CSV/XLSX, Inhaltsliste und Einzel-Downloads verwendet – ohne standardmäßiges UUID-Präfix. Originalnamen bleiben sichtbar. Manuelle Namen sind versioniert und vor erneuter Agentenverarbeitung geschützt. Bestandsnamen nur nach Vorschau ausdrücklich übernehmen; bestehende Pakete bleiben unverändert. Details und REST-/MCP-Aufrufe: [Übergabenamen](docs/HANDOVER_NAMES.md).
+**Lesbare Übergabenamen** werden separat aus strukturierten Belegdaten erzeugt und für neue ZIPs, Excel-Beleglinks, Inhaltsliste und Einzel-Downloads verwendet – ohne standardmäßiges UUID-Präfix. Originalnamen bleiben sichtbar. Manuelle Namen sind versioniert und vor erneuter Agentenverarbeitung geschützt. Bestandsnamen nur nach Vorschau ausdrücklich übernehmen; bestehende Pakete bleiben unverändert. Details und REST-/MCP-Aufrufe: [Übergabenamen](docs/HANDOVER_NAMES.md).
 
 ## Synthetischer Beispielmonat
 
