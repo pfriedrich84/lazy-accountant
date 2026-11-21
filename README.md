@@ -1,155 +1,176 @@
+<p><img src="docs/brand/lazy-accountant-logo.svg" width="480" alt="Lazy Accountant — freundlicher Roboter mit abgehaktem Beleg"></p>
+
 # Lazy Accountant
 
-Selbst betriebene, deutschsprachige Webanwendung für Dokumenteingang und Monatsübergabe an die Steuerberatung. **Etappe 1 aus [Issue #1](https://github.com/pfriedrich84/lazy-accountant/issues/1)**: getrennte Firmen, Originalablage, Prüfung, IMAP, unveränderliche ZIP-Pakete, SMTP, authentifiziertes MCP und drei Agenten-Skills.
+**Belege automatisch sammeln lassen. Vom gewohnten Agenten bearbeiten lassen. Für die Steuerberatung vorbereiten lassen.**
 
-Django/DRF + PostgreSQL · React/TypeScript mit React Router Framework-SPA, Material UI und TanStack Query · Django-Q2 mit ORM-Broker · offizielles MCP Python SDK v2. **Keine serverseitige LLM-Anbindung, kein eigener Monatszeitplaner.** Orca startet den externen Agenten.
+Lazy Accountant ist die selbst betriebene Dokumentablage und Werkzeugbasis für Ihre agentengestützte Belegvorbereitung. Der eingerichtete IMAP-Abruf sammelt Anhänge aus Ihrem Belegpostfach. Ihren gewohnten MCP-fähigen Agenten beauftragen Sie damit, die Unterlagen auszulesen, zuzuordnen und die Monatsübergabe vorzubereiten — statt jeden Beleg selbst durch eine Oberfläche zu klicken.
 
-## Start mit Docker Compose
+Für Selbstständige und kleine Unternehmen, die Belegarbeit delegieren und die eigentliche Buchhaltung ihrer Steuerberatung überlassen möchten. Sie geben den Auftrag und klären Rückfragen; der Agent erledigt die Aufarbeitung innerhalb seiner Berechtigungen. Lazy Accountant hält Originale, strukturierte Ergebnisse, Revisionen und Paketstände nachvollziehbar fest. Mehrere Firmen bleiben getrennt.
 
-Voraussetzung: Docker Engine mit Compose-Plugin und Python 3 zum einmaligen Erzeugen der Konfiguration. Docker legt die benannten Volumes für PostgreSQL und Dokumente selbst an; kein Host-Ablageordner ist nötig. Der Web-/API-/MCP-Port **8000 wird am Host veröffentlicht** (`0.0.0.0:8000`); Datenbank- und ClamAV-Port bleiben intern. ClamAV benötigt zusätzlich bis zu 3 GiB RAM; mindestens etwa 6 GiB für den Stack vorsehen.
+**Ihr Agent ist der Arbeitszugang. Die Weboberfläche ist Ihr Überblick und Kontrollpunkt** — für Einrichtung, offene Fälle, Originalvergleich und bei Bedarf manuelle Korrekturen. Sie müssen nicht zusätzlich in einer neuen Chatoberfläche arbeiten. Unterstützt Ihre Agentenumgebung wiederkehrende Aufträge, können Sie die Arbeit dort auch automatisieren: zum Beispiel jeden Montag nach offenen Fällen schauen und berichten lassen.
 
-```sh
-python3 scripts/init-env.py
-# .env lokal prüfen. ADMIN_PASSWORD steht ausschließlich dort.
-docker compose up --build -d --wait --wait-timeout 900
-```
+![Monatsübersicht mit acht Dokumenten und zwei offenen Prüfungen](docs/screenshots/demo-uebersicht.png)
 
-Oberfläche: **http://localhost:8000/** · Benutzer `admin`, Passwort aus `.env`. Django Admin zusätzlich unter `/admin/`. Zugangsdaten nie in Git/Chat/Buildprotokolle kopieren. `init-env.py` überschreibt keine bestehende Konfiguration und erzeugt nur die private `.env`. App und Worker teilen das Dokumentvolume unter `/data` und laufen als Benutzer `1000:1000`; Docker übernimmt beim erstmaligen Anlegen dessen private Verzeichnisrechte aus dem Image.
+*UI-Demo mit ausschließlich fiktiven Daten. Alle Screenshots zeigen die echte Oberfläche mit synthetischen API-Antworten; sie sind kein Nachweis eines ausgeführten Imports, Virenscans oder Versands.*
 
-Der Start führt Migrationen und Bootstrap idempotent aus. App und separater Worker verwenden dieselbe Codebasis; PostgreSQL ist die persistente Queue. Firmen, Konten/Depots, Kategorien, Empfänger, Mailzugänge und Agententoken sind über **Einstellungen** konfigurierbar.
+## So arbeiten Sie mit Ihrem Agenten
 
-Für das private LAN `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MCP_ALLOWED_HOSTS` und `MCP_ALLOWED_ORIGINS` in `.env` **explizit** um die tatsächliche interne Server-IP oder den Hostnamen ergänzen, einschließlich Port bei den Origins/MCP-Hosts. Die Veröffentlichung des Ports hebt die Host-/Origin-Prüfung nicht auf. `HTTP_PORT` ändert den Host-Port, `HTTP_BIND=127.0.0.1` beschränkt ihn wieder auf lokalen Zugriff. Bestehende `.env` mit `HTTP_BIND=127.0.0.1` für LAN-Zugriff bewusst auf `0.0.0.0` oder die interne Server-IP ändern. Kein öffentlicher Betrieb über unverschlüsseltes HTTP; Firewall/private Netzgrenze beachten. Domain/TLS sind für den vereinbarten internen Start nicht erforderlich.
+Sie bleiben im Gespräch mit Ihrem gewohnten Agenten — auch wenn Sie nur wissen möchten, ob noch etwas Ihre Aufmerksamkeit braucht.
 
-### Dockhand
+*Die folgenden Dialoge sind unabhängige Beispiele mit erfundenen Antworten, keine aufgezeichneten Agentenläufe.*
 
-Als Git-Stack aus `main` mit `compose.yaml` und Build-Kontext Repository-Wurzel deployen; beim Update erneut bauen. Die privaten Konfigurationswerte aus `.env` in Dockhand übernehmen (alternativ `.env.example` mit frisch erzeugten starken Secrets ausfüllen). Kein `DOCUMENTS_ROOT`, kein Host-`chown` und keine Anpassung an die Benutzer-ID des Docker-Hosts nötig. Docker erzeugt die Volumes `documents` und `postgres` mit dem Stack-Projektpräfix. Für einen späteren Netzwerkspeicher nur die Definition des Dokumentvolumes ändern, nicht den Anwendungspfad `/data`; vorhandene Daten vorher konsistent migrieren, siehe [Betrieb](docs/OPERATIONS.md#dokumentvolume-und-späterer-netzwerkspeicher).
+### „Haben wir Belege, die noch geprüft werden müssen?“
 
-## Bankabgleich (CAMT-Ausbau zu #10)
+> **Sie:** „Schau bei der Musterwerk GmbH nach: Haben wir noch Belege, die ich prüfen muss?“
+>
+> **Agent:** „Zwei Belege haben offene Punkte. Bei der Software-Rechnung ist die Zuordnung noch zu klären, beim Scanbeleg kann ich das Belegdatum nicht sicher erkennen. Ich zeige dir beide Belege mit den jeweiligen Rückfragen.“
 
-Fremdwährungsrechnungen können nach beleggebundener Vorschau ausdrücklich mit anderswährenden Kartenbelastungen verknüpft werden. Rechnungsdeckung, Bankverbrauch und Gebühren bleiben getrennt; keine Live-Kurse und keine FX-Automatik. REST-/MCP-Vertrag, unterstützte Originalfelder, Rundung und bewusste Parsergrenzen: [Fremdwährungsdeckung](docs/fx-reconciliation.md).
+Nicht erst alle Dokumente öffnen: Lassen Sie sich die offenen Fälle mit Belegverweisen und konkretem Klärungsbedarf zusammenstellen. Der Agent unterscheidet dabei zwischen noch unbearbeiteten Unterlagen und Fällen, die nach seiner Aufarbeitung eine Rückfrage erfordern.
 
-Ein erster CAMT-basierter Zahlungsstand für importierte Ein- und Ausgangsrechnungen ist unter **Zahlungsstand** und im Dokumentdetail verfügbar. Eindeutige Referenztreffer mit unabhängig verifizierter Gegenpartei/IBAN dürfen automatisch bestätigt werden; Teilzahlungen und Aufhebung sind manuell möglich. Eindeutig referenzierte gebuchte CAMT-Vollrückbuchungen öffnen betroffene Rechnungen automatisch wieder; unklare Bezüge bleiben Prüffälle. Überfälligkeit wird nur angezeigt. Grenzen, Rechte, Migration und verbleibende Arbeit: [Bankabgleich](docs/BANK_RECONCILIATION.md). Kein PDF-only-Abgleich, kein Mahnversand, keine vollständige Erledigung von #10.
+### „Konntest du die Zahlungen zuordnen?“
 
-## Erster Ablauf
+> **Sie:** „Wie weit bist du mit dem Oktober-Abgleich? Konntest du die Zahlungen den Rechnungen zuordnen?“
+>
+> **Agent:** „Die eindeutigen Treffer aus dem beauftragten Abgleich sind zugeordnet. Bei einer Rechnung ist erst ein Teilbetrag gedeckt. Eine weitere Zuordnung ist mehrdeutig und bleibt offen. Ich zeige dir die betreffenden Rechnungen, Restbeträge und Bankbewegungen.“
 
-1. Firma anlegen, sicheren eindeutigen Ordnernamen wählen; Konto/Depot, Kategorien und Steuerberater-Empfänger hinterlegen.
-2. PDFs, JPG/PNG und CAMT-XML im **Dokumenteingang** hochladen. Sie bleiben zunächst in privater Quarantäne; erst ein erfolgreicher lokaler ClamAV-Hintergrundscan schaltet Original, Vorschau, Parser und Bearbeitung frei. Fund, Scanfehler oder veraltete Signaturen bleiben sichtbar gesperrt. Ungeklärte Firma bleibt im persönlichen Eingang. Der Import rät keinen endgültigen Übergabemonat.
-3. Eindeutige Nichtbelege über „Als Nichtbeleg ausschließen“ mit Grund reversibel aus dem aktiven Eingang entfernen; im Ausschlussfilter wiederfinden und wiederherstellen. Keine Original-Löschung, keine automatische Dateinamenregel. Bestehende Pakete bleiben unverändert, neue Pakete weisen bewusste Ausschlüsse separat aus. [Vertrag und Upgradehinweise](docs/DOCUMENT-EXCLUSIONS.md).
+Der Agent kann den gespeicherten Zahlungsstand und Zuordnungskandidaten über MCP abfragen. Ein Abgleich und bestätigte Zuordnungen erfordern einen entsprechenden Bearbeitungsauftrag und die nötigen Rechte. Eine reine Statusfrage ist kein neuer Änderungsauftrag. Grundlage sind die vorhandenen, unterstützten CAMT-Daten — kein Live-Bankzugriff. Automatische Bestätigungen sind auf eindeutige Treffer mit unabhängig verifizierter Gegenpartei/IBAN begrenzt; andere Zuordnungen brauchen eine ausdrückliche Entscheidung. Dafür stehen MCP-Werkzeuge zur Verfügung, kein zusätzlicher mitgelieferter Abgleich-Skill. „Nicht zugeordnet“ bedeutet nicht automatisch „nicht bezahlt“.
 
-   Dokument öffnen: Originalseite neben Metadaten prüfen, Art/Firma/Monat/Konto zuordnen. Zwischenspeichern ist mit offenen Punkten möglich; Freigabe nur ohne Validierungsfehler. Geldbeträge als Dezimalstrings mit Punkt eingeben. Quartals-/Mehrmonatsauszüge behalten ihren echten Zeitraum; die Zuordnung zu einem Übergabemonat ausdrücklich mit Begründung bestätigen.
-4. Unter **Monatsablage** die echte Ordnerstruktur im Dokumentvolume prüfen. Alle vier Unterordner bleiben erhalten:
+### „Arbeite den Eingang auf und frag nur bei Unklarheiten nach.“
 
-   ```text
-   Firma/Jahr/Monat/ER/
-   Firma/Jahr/Monat/AR/
-   Firma/Jahr/Monat/Bankkonto/
-   Firma/Jahr/Monat/Wertpapiere/
-   ```
+> **Sie:** „Arbeite den Dokumenteingang der Musterwerk GmbH auf. Ordne eindeutige Belege zu und gib sie frei, wenn keine Prüfpunkte offen sind. Was du nicht sicher klären kannst, legst du mir gesammelt vor.“
+>
+> **Agent:** „Ich lese die verfügbaren Belege aus und speichere die eindeutigen Zuordnungen. Unklare Angaben lasse ich offen und fasse die Rückfragen mit Belegverweisen zusammen. Sicherheitsgesperrte Dateien überspringe ich und melde sie separat.“
 
-5. Unter **Übergabe & Versand** Vorschau prüfen und Paket verbindlich erzeugen. ZIP enthält Originale und eine Excel-Arbeitsmappe mit acht Blättern einschließlich Zahlungszuordnungen, Bankbewegungen und Inhaltsliste mit Originalprüfsummen. [Format und Grenzen](docs/HANDOVER_WORKBOOK.md). Fehlende/ausgeschlossene Unterlagen und Empfänger bleiben sichtbar.
-6. Optional unter **Einstellungen → IMAP & SMTP** das Belegpostfach samt Importbeginn einrichten und **nächtlichen IMAP-Abruf** aktivieren. Automatischer Start einmal pro Nacht ab **03:00 Uhr Europe/Vienna**; große Rückstände werden in begrenzten Teilabrufen abgearbeitet. Manueller Abruf bleibt jederzeit möglich. Importierte Anhänge starten noch keinen KI-Agenten automatisch.
-7. SMTP konfigurieren und den gespeicherten Snapshot ausdrücklich versenden. `SMTP angenommen` ist **keine bestätigte Zustellung**. Ein unbekannter Ausgang wird nicht automatisch erneut gesendet; Neuversand ist eine erkennbare, protokollierte Aktion.
+So delegieren Sie nicht nur das Auslesen, sondern die Aufarbeitung innerhalb eines klaren Auftrags. Originale bleiben unverändert; Ergebnisse und Änderungen werden nachvollziehbar gespeichert.
+
+### „Schau jeden Montag nach und berichte mir, was zu prüfen ist.“
+
+> **Sie, als wiederkehrender Auftrag in Ihrer Agentenumgebung:** „Prüfe jeden Montag den Dokumenteingang der Musterwerk GmbH. Berichte mir, welche Belege noch ungeklärt sind, wo Zahlungszuordnungen offen sind und welche Rückfragen du an mich hast. Nur prüfen und berichten, nichts ändern oder versenden.“
+>
+> **Agent, im Wochenbericht:** „Diese Woche brauchen zwei Belege deine Rückmeldung. Außerdem ist eine Zahlungszuordnung noch mehrdeutig. Hier sind die betroffenen Unterlagen mit meinen konkreten Fragen. Änderungen oder Versand habe ich nicht ausgelöst.“
+
+**Was Sie Ihrem Agenten einmalig auftragen können, lässt sich auch wiederkehrend ausführen lassen**, sofern Ihre Agentenumgebung zeitgesteuerte Aufträge mit MCP-Zugriff unterstützt. Dort legen Sie Zeitplan, Zeitzone, Firmenumfang, Berechtigungen und Berichtsweg fest — etwa einen montäglichen Kontrolllauf oder die regelmäßige Aufarbeitung des Eingangs. Lazy Accountant stellt dafür Daten, Werkzeuge und nachvollziehbare Ergebnisse bereit; der Zeitplan und die Zustellung des Berichts liegen beim externen Agentensystem. Die Verbindung allein legt noch keine Automatisierung an.
+
+Kontrolle und Bearbeitung bleiben getrennte Aufträge: Für den Wochencheck einen eigenen, auf die betroffenen Firmen beschränkten Token **nur mit `read`** verwenden. Damit sind Änderungen und Versand auch technisch gesperrt, nicht bloß im Prompt untersagt. Der Bericht wird in diesem Fall über die Agentenumgebung ausgegeben; das Speichern eines Agentenberichts in Lazy Accountant benötigt `process`.
+
+Soll der Agent auch aufarbeiten, benötigt er `process` und einen ausdrücklichen Bearbeitungsauftrag mit Regeln für Unklarheiten. Versand braucht zusätzlich `send` und eine gesonderte Autorisierung.
+
+### „Ist der Monat bereit für die Steuerberatung?“
+
+> **Sie:** „Zeig mir die Übergabevorschau für Oktober. Was wäre enthalten, und was ist noch offen? Noch kein Paket erzeugen und nichts versenden.“
+>
+> **Agent:** „Die Vorschau enthält sechs Originale. Zwei Belege sind wegen offener Prüfpunkte nicht enthalten; nach der hinterlegten Regel ist der Versand deshalb gesperrt. Ich zeige dir den Empfänger und die offenen Fälle. Es wurde nichts versandt.“
+
+Sie können Vorschau, Paketbildung und Versand getrennt beauftragen. Ein Auftrag zur Vorbereitung ist keine Versandfreigabe.
+
+*Illustrative Dialoge mit fiktiven Antworten, keine Protokolle tatsächlich ausgeführter Agentenläufe. Die Beispiele sind voneinander unabhängig; Zahlen und Fälle beschreiben keinen gemeinsamen Live-Datenstand. Der Agent muss seine tatsächliche Antwort aus den zugänglichen Daten und Werkzeugergebnissen ableiten und fehlende Daten oder Rechte ausdrücklich benennen.*
+
+Das sind beispielhafte Nutzeraufträge, keine eingebauten Chatbefehle. Der verbundene Agent bearbeitet sie über MCP-Werkzeuge. Drei mitgelieferte Skills beschreiben die Abläufe für [Dokumenteingang](skills/dokumenteingang-aufarbeiten/SKILL.md), [Konto-/Depotunterlagen](skills/konto-und-depotunterlagen-sortieren/SKILL.md) und [Monatsübergabe](skills/monatsuebergabe-vorbereiten/SKILL.md).
+
+**Was automatisch läuft — und was Sie beauftragen:**
+
+- **Sammlung:** Nach Einrichtung und Aktivierung holt Lazy Accountant Anhänge einmal pro Nacht per IMAP ab. Upload und manueller Abruf bleiben möglich.
+- **Bearbeitung:** Ihr externer Agent arbeitet auf Ihren Auftrag über MCP. Wiederkehrende Agentenläufe richten Sie in Ihrer Agentenumgebung ein, etwa in Orca. Ein Import startet nicht von selbst einen Agenten; Lazy Accountant enthält weder ein eigenes LLM noch einen Monatszeitplaner.
+- **Kontrolle:** Klare Fälle kann der berechtigte Agent strukturiert speichern und ohne offene Prüfpunkte freigeben. Unklarheiten bleiben sichtbar; manuelle Korrekturen werden nicht still überschrieben.
+- **Versand:** Benötigt einen ausdrücklichen Auftrag und das gesonderte Versandrecht — auch wenn der Agent die Vorbereitung übernimmt.
+
+## Was dabei in Lazy Accountant entsteht
+
+Die Screenshots zeigen Ablage, Ergebnisse und offene Fälle, nicht eine verpflichtende Klickstrecke. Sie illustrieren keinen ausgeführten Agentenlauf.
+
+### 1. Ein gesammelter Dokumenteingang
+
+Anhänge aus dem eingerichteten Belegpostfach landen im Eingang. PDFs, JPG/PNG und CAMT-XML lassen sich zusätzlich hochladen. Ihr Agent kann den Abruf auch ausdrücklich anstoßen und den Eingang über MCP aufarbeiten. Dokumente ohne sichere Firmenzuordnung bleiben zunächst im persönlichen Eingang.
+
+Neue Dateien werden erst nach erfolgreicher lokaler Malwareprüfung für Agentenbearbeitung und Dateizugriff freigegeben. Gesperrte Dateien bleiben sichtbar.
+
+![Dokumenteingang mit Rechnungen, Kontoauszügen und Depotunterlagen](docs/screenshots/demo-dokumenteingang.png)
+
+### 2. Ausgelesene Angaben und gezielte Rückfragen
+
+Über MCP liest Ihr Agent Dokumenttext und bei Bedarf Seitenbilder, ordnet Firma, Belegart, Monat und Rechnungsdaten zu und speichert validierte Ergebnisse. Kann er etwas nicht eindeutig klären, hält er offene Punkte fest, statt Angaben zu erfinden. Bewusste Nichtbeleg-Ausschlüsse erfolgen nur auf autorisierten Auftrag und bleiben reversibel.
+
+Wenn Sie selbst nachsehen möchten, zeigt die Weboberfläche Original und Prüfdaten nebeneinander. Sie können gezielt Rückfragen klären oder Angaben korrigieren, statt jeden Beleg von Hand zu erfassen.
+
+![Belegprüfung mit Originalvorschau und noch offener Kategorie](docs/screenshots/demo-belegpruefung.png)
+
+*Die Belegvorschau ist ein synthetisches SVG, keine aus einer echten PDF gerenderte Seite. „Kategorie noch prüfen“ ist ein beispielhafter offener Prüfpunkt, kein generelles Pflichtfeld.*
+
+### 3. Eine nachvollziehbare Monatsablage
+
+Die vom Agenten gespeicherten Zuordnungen führen Ihre Unterlagen in die Monatsablage: Eingangsrechnungen, Ausgangsrechnungen, Bankkonto und Wertpapiere. Sie sehen den erreichten Prüfstand und verbleibende Ausnahmen. Lesbare Übergabenamen helfen beim Wiederfinden; die Originalnamen bleiben nachvollziehbar.
 
 <details>
-<summary>Screenshot aus dem tatsächlichen synthetischen Compose-Browsertest</summary>
+<summary>Monatsablage ansehen</summary>
 
-![Monatsübergabe mit Paketversion, Inhaltsliste und Versandhistorie](docs/screenshots/uebergabe-desktop.png)
+![Monatsablage mit allen vier Dokumentbereichen und offenen Prüfungen](docs/screenshots/demo-monatsablage.png)
 
 </details>
 
-Originalbytes bleiben unverändert; Ausleseergebnisse sind getrennte, revisionsgeschützte Metadaten. Monatskorrekturen ändern die echte Ablage, aber niemals bereits erzeugte Paket-Snapshots. Nachträge verweisen auf Vorgänger und berücksichtigen deren Revisionsstände.
+### 4. Eine vorbereitete Übergabe statt manueller Paketarbeit
 
-**Lesbare Übergabenamen** werden separat aus strukturierten Belegdaten erzeugt und für neue ZIPs, Excel-Beleglinks, Inhaltsliste und Einzel-Downloads verwendet – ohne standardmäßiges UUID-Präfix. Originalnamen bleiben sichtbar. Manuelle Namen sind versioniert und vor erneuter Agentenverarbeitung geschützt. Bestandsnamen nur nach Vorschau ausdrücklich übernehmen; bestehende Pakete bleiben unverändert. Details und REST-/MCP-Aufrufe: [Übergabenamen](docs/HANDOVER_NAMES.md).
+Ihr Agent kann über MCP die Paketvorschau abrufen, offene Punkte berichten und auf Auftrag die Paketbildung anstoßen. Lazy Accountant erzeugt das ZIP mit Originalen und einer Excel-Arbeitsmappe mit acht Blättern, darunter Zahlungszuordnungen, Bankbewegungen und eine Inhaltsliste mit Originalprüfsummen. [Format und Grenzen](docs/HANDOVER_WORKBOOK.md). Ein erzeugtes Paket bleibt unverändert; spätere Korrekturen verändern keine bereits gespeicherten Paketstände. Inhalt, Empfänger und offene Punkte sind auch in der Weboberfläche einsehbar.
 
-## Synthetischer Beispielmonat
+Mit gesondertem Versandrecht und ausdrücklichem Auftrag kann der Agent den gespeicherten Paketstand per SMTP versenden; alternativ nutzen Sie die Oberfläche. Eine SMTP-Annahme ist keine Zustellbestätigung. Ein unbekannter Versandausgang wird nicht automatisch erneut gesendet.
 
-```sh
-docker compose exec app python backend/manage.py bootstrap \
-  --demo --sample-month 2026-10 --output /data/samples
-# Optional: mit --classified die synthetischen Metadaten bereits freigeben.
-```
+![Übergabevorschau mit sechs Originalen und zwei sichtbaren offenen Prüffällen](docs/screenshots/demo-uebergabevorschau.png)
 
-Zwei getrennte Firmen mit **je acht Dokumenten**, Bankkonto/Depot, Kategorien sowie AR, ER, Gutschrift, Storno, CAMT + Auszugs-PDF, Wertpapier-PDF und Scanbeleg. Wiederholtes Bootstrap erzeugt keine Dubletten. Im Dokumentvolume unter `/data/samples/` liegen zusätzlich die Uploaddateien der ersten Firma, im Unterordner `Zweite-Firma/` diejenigen der zweiten Firma. Bei Bedarf auf den Host kopieren: `docker compose cp app:/data/samples/. ./var/samples/` (Zielordner vorher anlegen).
+*Die Demo zeigt bewusst keinen „alles erledigt“-Zustand: Zwei Unterlagen sind noch zu prüfen und nicht im Paket enthalten; der Versand ist nach der dargestellten Regel gesperrt. Es wurde kein ZIP erzeugt und keine E-Mail versandt.*
 
-Ein vollständig automatisierter, **echter MCP-/IMAP-/SMTP-Test** benötigt nur das mitgelieferte kontrollierte Mail-Testprofil, keine produktiven Mailzugänge:
+## Was außerdem hilft
 
-```sh
-docker compose --profile test-mail up -d --wait
-uv sync --locked
-uv run python scripts/mcp_client.py --exercise --mail --report var/smoke-report.json
-```
+- **Zahlungsstand nachvollziehen:** Unterstützte CAMT-Kontoumsätze mit importierten Rechnungen abgleichen; Teilzahlungen und manuelle Zuordnungen berücksichtigen. Kein vollständiges Banking und kein Mahnversand. [Umfang und Grenzen](docs/BANK_RECONCILIATION.md).
+- **Zugriff passend begrenzen:** MCP-Token auf benötigte Firmen und Rechte beschränken. Aufarbeitung und Versand sind getrennte Berechtigungen; Token lassen sich widerrufen. [Agentenanbindung und Rechte](docs/MCP.md).
+- **Selbst betreiben:** Dokumentablage und lokaler Virenscanner laufen in Ihrer Infrastruktur. Der Virenscanner benötigt Internetzugriff für Signaturupdates; Dokumentinhalte werden dabei nicht übertragen. Mailversand und eine von Ihnen konfigurierte externe Agentenanbindung sind weitere Datenübertragungen — „self-hosted“ bedeutet nicht automatisch „keine Daten verlassen das System“.
 
-Der Client legt ausschließlich eine neue synthetische Firma an, importiert mehrere Anhänge über echten IMAP, liest/klassifiziert alle Dokumentarten über MCP, erzeugt das ZIP im separaten Worker und verifiziert SMTP-Mailteile durch Rücklesen vom Testpostfach. Der temporäre MCP-Token wird anschließend widerrufen. GreenMail läuft nur im optionalen Profil; Testports 3025/3143 sind an Loopback gebunden.
+## Ausprobieren und selbst betreiben
 
-## MCP und Skills für Orca
-
-Unter **Einstellungen → Agent / MCP** einen firmenbeschränkten Token mit benötigten Funktionsrechten erzeugen. Für den Eingang ohne Firmenzuordnung zusätzlich `inbox`, für autorisierten Versand zusätzlich `send` vergeben.
-
-- Streamable HTTP: `http://<interner-host>:8000/mcp/`
-- Header: `Authorization: Bearer <Token>`
-- Derselbe Header schützt Original-/Seiten- und Paketdownloads.
-- Host/Origin explizit erlauben; kein anonymer MCP-Zugriff.
+Der Einstieg erfolgt mit Docker Compose. Sie benötigen Docker Engine mit Compose-Plugin, Python 3 für die einmalige Konfiguration und ungefähr 6 GiB RAM für den Stack einschließlich ClamAV.
 
 ```sh
-# Token sicher als Umgebungsvariable setzen, nicht als CLI-Argument:
-uv run python scripts/mcp_client.py --url http://localhost:8000
-# Liest LA_MCP_TOKEN; ohne --exercise nur Discovery/Firmenabfrage.
+python3 scripts/init-env.py
+# .env lokal prüfen; das erzeugte ADMIN_PASSWORD nicht weitergeben.
+docker compose up --build -d --wait --wait-timeout 900
 ```
 
-Die versionierten Skills unter `skills/<name>/SKILL.md` sind agentenunabhängige ausführbare Werkzeugabläufe:
+Danach öffnen Sie **http://localhost:8000/** und melden sich mit `admin` und dem Passwort aus Ihrer privaten `.env` an. Für den agentengestützten Arbeitsmodus richten Sie einmalig ein:
 
-- `dokumenteingang-aufarbeiten`
-- `konto-und-depotunterlagen-sortieren`
-- `monatsuebergabe-vorbereiten`
+1. **Firma und Ablage:** Konten/Depots, Kategorien und Steuerberatungsempfänger unter **Einstellungen** hinterlegen.
+2. **Automatische Sammlung:** IMAP-Postfach samt Importbeginn konfigurieren und den nächtlichen Abruf aktivieren.
+3. **Gewohnten Agenten verbinden:** Unter **Einstellungen → Agent / MCP** einen firmenbeschränkten Token mit den benötigten Rechten erzeugen. Den erreichbaren Endpunkt `http://<interner-host>:8000/mcp/` und den geheimen Bearer-Token in Ihrem MCP-fähigen Client konfigurieren; Host-/Origin-Freigaben beachten. Keine Zugangsdaten in Prompts oder ins Repository kopieren.
+4. **Arbeit delegieren:** Die mitgelieferten Skills im Agenten verfügbar machen und einen ersten Aufarbeitungsauftrag erteilen. Für wiederkehrende Bearbeitung den Lauf in Ihrer externen Agentenumgebung einrichten. Versand nur gesondert autorisieren.
 
-Details zu Schemas, Auftrags-/Idempotenz-IDs, Berechtigungen, Lifecycle und Client: **[docs/MCP.md](docs/MCP.md)**. Orca-Zeitpunkt/Job und produktive Verbindung werden später in Orca eingerichtet; die Anwendung enthält keinen Monats-Cronjob.
+Der Client muss **Streamable HTTP**, einen konfigurierbaren **`Authorization: Bearer`-Header** und für die visuelle Auslese von Scans **Bildinhalte aus MCP-Werkzeugen** unterstützen. Der interne Host muss aus der Agentenumgebung erreichbar sein. Eine reine stdio-Anbindung genügt für diesen Endpunkt nicht.
 
-## Tests und lokale Entwicklung
+Die genaue Client-Konfiguration und Live-Prüfung hängen von Ihrer Agentenumgebung ab. Die produktive Anbindung mit dem tatsächlich verwendeten Agenten — auch bei Orca — ist laut aktuellem Projektstand noch live abzunehmen; die Beispiele sind keine Kompatibilitätszusage für beliebige Clients. [MCP-Einrichtung, Skills und Berechtigungen](docs/MCP.md).
 
-Aktuelle gepinnte Laufzeiten: **Python 3.15.2**, **Node 26.13.1**, **PostgreSQL 18.7**. Für lokale Entwicklung/den SDK-Test zusätzlich `uv 0.13.9` und Node bereitstellen; `.python-version`/`.node-version` halten die Laufzeitwahl fest. `uv sync` kann die passende Python-Version selbst installieren. Release-/Kompatibilitätsprüfung: [docs/VERSIONS.md](docs/VERSIONS.md).
+**Wichtig:** Standardmäßig wird Port 8000 an allen Host-Schnittstellen veröffentlicht. Für ausschließlich lokalen Zugriff setzen Sie vor dem Start `HTTP_BIND=127.0.0.1` in `.env`. Kein öffentlicher Betrieb über unverschlüsseltes HTTP. Für LAN-Zugriff müssen Host-/Origin-Freigaben explizit passen; Backups und Schlüsselaufbewahrung gehören zum eigenen Betrieb.
 
-```sh
-uv sync --locked
-uv run ruff check backend scripts
-uv run pytest -q
-uv run python backend/manage.py makemigrations --check --dry-run
-cd frontend
-npm ci
-npm run typecheck
-npm test
-npm run build
-```
+[Vollständige Startanleitung, Demo-Monat und Entwicklung](docs/GETTING_STARTED.md) · [Betrieb und Backup/Restore](docs/OPERATIONS.md) · [Malwareprüfung und Sicherheitsgrenzen](docs/SECURITY.md).
 
-Ohne `POSTGRES_HOST` verwenden lokale Tests/Entwicklung ausdrücklich SQLite als Fallback, **nicht** der Compose-Betrieb. Für PostgreSQL-Tests `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` und `POSTGRES_PASSWORD` setzen. Der Testbenutzer braucht `CREATEDB`. Die CI prüft PostgreSQL, Frontend, tatsächliches Compose, MCP/Mail, Browser, Worker-Neustart und Backup/Restore.
+## Bewusster Umfang
 
-Lokaler ASGI-Betrieb nach `migrate`, `bootstrap` (erstmalig `ADMIN_PASSWORD` setzen) und Frontendbuild:
+Lazy Accountant bereitet Unterlagen vor. Es ersetzt **keine vollständige Buchhaltung, keine Steuerberatung und keine steuerliche Wertpapierberechnung**. Eigene Rechnungen erstellen, wiederkehrende Rechnungen, Projekte und Zeiterfassung gehören nicht zum hier beschriebenen Funktionsumfang.
 
-```sh
-mkdir -p var/documents
-uv run python backend/manage.py migrate
-ADMIN_PASSWORD='<lokales langes Passwort>' uv run python backend/manage.py bootstrap --demo
-PYTHONPATH=backend uv run uvicorn config.asgi:application --host 127.0.0.1 --port 8000
-# In separatem Terminal mit derselben Umgebung:
-uv run python backend/manage.py qcluster
-```
+Auch mit nachvollziehbaren Revisionen und unveränderten Paketständen wird hier keine rechtliche Revisionssicherheits- oder Compliance-Zusage gemacht. Selbstbetrieb erfordert sichere Konfiguration, laufende Pflege und geprüfte Backups.
 
-Frontend-Hot-Reload optional mit `npm run dev`; Vite proxyt `/api` an Port 8000. Für den integrierten Browser-Smoke zuerst synthetische Uploaddateien unter `var/samples` erzeugen, dann:
+## Weiterführende Dokumentation
 
-```sh
-uv run python backend/manage.py bootstrap --sample-month 2026-10 --output var/samples
-cd frontend
-npx playwright install chromium
-ADMIN_PASSWORD='<lokales Passwort>' npm run test:browser
-```
+| Thema | Einstieg |
+| --- | --- |
+| Installation, Beispielmonat und Entwicklung | [Technischer Einstieg](docs/GETTING_STARTED.md) |
+| Betrieb und Wiederherstellung | [Betrieb](docs/OPERATIONS.md) |
+| Quarantäne und Malwareprüfung | [Sicherheit](docs/SECURITY.md) |
+| Agenten, MCP und Berechtigungen | [MCP](docs/MCP.md) |
+| Zahlungsstand und CAMT-Abgleich | [Bankabgleich](docs/BANK_RECONCILIATION.md) |
+| Unterstützte CAMT-Formate | [CAMT](docs/CAMT.md) |
+| Fremdwährungszuordnung | [Fremdwährungsdeckung](docs/fx-reconciliation.md) |
+| Nichtbelege begründet ausschließen | [Dokumentausschlüsse](docs/DOCUMENT-EXCLUSIONS.md) |
+| Lesbare Übergabenamen | [Übergabenamen](docs/HANDOVER_NAMES.md) |
+| Inhalt und Grenzen der Excel-Übergabe | [Übergabe-Arbeitsmappe](docs/HANDOVER_WORKBOOK.md) |
+| Laufzeiten und ausgeführte Abnahmen | [Versionen](docs/VERSIONS.md) · [Implementierungsprotokoll](docs/IMPLEMENTATION.md) |
+| Planung und spätere Etappen | [Plan](docs/PLAN.md) |
+| Herkunft der Produktbilder und des Logos | [Screenshots](docs/screenshots/README.md) · [Logo](docs/brand/README.md) |
 
-## Betrieb, Datensicherheit und Grenzen
-
-- **[Malwareprüfung und Quarantäne](docs/SECURITY.md)**: gemeinsamer REST-/MCP-/IMAP-Import, gepinntes lokales ClamAV 1.5.5, sichere Fehlerzustände, erneute Prüfung, Paket-/Versandsperren, Ressourcen/Signaturupdates und Aufbewahrungsregeln. Keine externen Scandienste, kein Fallback ohne Scanner. Beim Upgrade alte App/Worker stoppen: alle vorhandenen Originale ohne vertrauenswürdigen Scannachweis werden neu geprüft. Malwareprüfung ist keine Sicherheitsgarantie.
-
-- **[Betrieb und Backup/Restore](docs/OPERATIONS.md)**: gemeinsame Offline-Sicherung von PostgreSQL, Originalen, Snapshots, Mailteilen und Schlüssel; Integritätsprüfung und sicherer Wiederanlauf.
-- **[Reversibler Nichtbeleg-Ausschluss](docs/DOCUMENT-EXCLUSIONS.md)**: MCP/REST, UI, Rechte, Idempotenz, Paket-/Nachtragsverhalten und Migration/Rollback.
-- **[CAMT-Unterstützung](docs/CAMT.md)**: explizite Namespaces, sichere XML-Verarbeitung und sichtbare Fehler ohne Originalverlust.
-- **[Implementierungs-/Abnahmeprotokoll](docs/IMPLEMENTATION.md)**: tatsächlich ausgeführte Prüfungen, Umgebungshindernisse und verbleibende Live-Einrichtung.
-- **[Verbindlicher Plan und spätere Roadmap](docs/PLAN.md)**.
-
-Dies ist eine Unterlagenvorbereitung, keine vollständige Buchhaltung oder steuerliche Wertpapierberechnung. Eigene Rechnungen, Wiederholungsrechnungen, Bankabgleich, Projekte und Zeiten sind spätere Etappen. Echte Firmen-/Maildaten, interne Speicher-/Serveradressen und die Live-Orca-Anbindung sind Einrichtungsparameter, keine Voraussetzung für synthetische Entwicklungstests.
+Technische Basis: Django/DRF, PostgreSQL und React/TypeScript. Details zu Laufzeiten, Tests und Schnittstellen stehen in der technischen Dokumentation, nicht im Mittelpunkt dieses Produkteinstiegs.
