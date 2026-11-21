@@ -349,9 +349,14 @@ def test_payment_only_package_supplement_and_frozen_original(actor, companies):
     with zipfile.ZipFile(
         io.BytesIO(packages.package_bytes(packages.get_package(actor, after["id"])))
     ) as archive:
-        data = json.loads(archive.read(f"{company.folder}/2026/10/Zahlungsstand.json"))
-        assert data["payments"][0]["status"] == "paid"
-        assert any(n.endswith("Zahlungsstand.xlsx") for n in archive.namelist())
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(archive.read(f"{company.folder}/Monatsuebersicht_2026-10.xlsx")))
+        rows = list(wb["Ausgangsrechnungen"].iter_rows(min_row=5, values_only=True))
+        assert rows[1][15] == "Vollständig zugeordnet"
+        assert rows[1][17] == "Original im Vorgängerpaket (unverändert)"
+        assert wb["Ausgangsrechnungen"].cell(6, 18).hyperlink is None
+        assert wb["Zahlungszuordnungen"].max_row == 6
     assert packages.package_bytes(packages.get_package(actor, before["id"])) == original
 
 

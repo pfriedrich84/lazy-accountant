@@ -132,10 +132,12 @@ Sie bietet Einzelzuordnungen; Teil-/Sammelzuordnungen sind über REST/MCP mögli
 
 Zahlungsstände summieren Rechnungswährung, Bankverfügbarkeit summiert Bankwährung.
 Die Zahlungshistorie enthält beide Währungen sowie Originalquellen. Neue
-Paket-Snapshots verwenden Zahlungsschema 2; `Zahlungsstand.json` exportiert die
-vollständige FX-Evidenz und Zahlungsrevision. Nachträge berücksichtigen reine
-Zahlungsänderungen. Bestehende Snapshot-Inhalte werden nicht umgeschrieben;
-ältere Snapshots exportieren weiterhin ihre gespeicherte Schemaversion.
+Paket-Snapshots verwenden Zahlungsschema 2 und bewahren die vollständige FX-Evidenz
+und Zahlungsrevision. Neue Pakete liefern eine [Excel-Arbeitsmappe](HANDOVER_WORKBOOK.md):
+Das Blatt Zahlungszuordnungen trennt Rechnungsbetrag, Bankgegenwert, Gebühren und
+FX-Originaltext. Es ersetzt die separate `Zahlungsstand.json`. Nachträge berücksichtigen
+reine Zahlungsänderungen. Bestehende ZIPs und Snapshot-Inhalte werden nicht umgeschrieben;
+ältere Pakete bleiben in ihrem gespeicherten Format verfügbar.
 
 Firmenrechte, Sicherheitsprüfung sämtlicher Originalquellen, Ausschlüsse,
 Duplikat-/Identitätssperren und Rückbuchungssperren gelten auch für FX.

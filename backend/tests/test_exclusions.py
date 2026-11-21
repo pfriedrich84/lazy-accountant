@@ -359,7 +359,10 @@ def test_nonblocking_package_exclusions_inbox_privacy_and_legacy(actor, companie
     data = packages.package_bytes(obj)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         assert not any(name.endswith(".png") for name in archive.namelist())
-        text = archive.read(f"{c.folder}/2026/10/Begleitschreiben.txt").decode()
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(archive.read(f"{c.folder}/Monatsuebersicht_2026-10.xlsx")))
+        text = str(list(wb["Übersicht"].values))
         assert "Company signature" in text and "ohne Monatszuordnung" in text
         assert "PRIVATE" not in text and "private-personal-name" not in text
     assert mail.queue_dispatch(actor, obj.id, "send-no-block")["id"]
