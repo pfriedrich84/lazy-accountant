@@ -256,7 +256,7 @@ export default function Shell() {
           elevation={0}
           sx={{ border: 0, borderBottom: "1px solid #e1e7e5" }}
         >
-          <Toolbar sx={{ gap: 2, py: 1, flexWrap: "wrap" }}>
+          <Toolbar sx={{ gap: { xs: 1, sm: 2 }, py: 1, flexWrap: "wrap" }}>
             <IconButton
               onClick={() => setMobile(true)}
               aria-label="Menü öffnen"
@@ -265,7 +265,10 @@ export default function Shell() {
               ☰
             </IconButton>
             <BrandIcon />
-            <FormControl size="small" sx={{ minWidth: { xs: 150, sm: 240 } }}>
+            <FormControl
+              size="small"
+              sx={{ minWidth: 0, width: { xs: "calc(100% - 96px)", sm: 240 } }}
+            >
               <InputLabel id="active-company-label">Firma</InputLabel>
               <Select
                 labelId="active-company-label"
