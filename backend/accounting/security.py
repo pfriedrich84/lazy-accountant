@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 def require_clean(doc):
     # Reload: a previously fetched object must not bypass a subsequent rescan.
-    current = Document.objects.get(id=doc.id)
+    current = Document.objects.only(
+        "id", "security_status", "security_error", "sha256", "scanned_sha256"
+    ).get(id=doc.id)
     if current.security_status != "clean" or current.scanned_sha256 != current.sha256:
         raise DomainError(
             "Datei sicherheitsgesperrt: " + current.security_status + ". " + current.security_error, 423

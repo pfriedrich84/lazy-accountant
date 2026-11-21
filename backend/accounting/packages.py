@@ -17,6 +17,7 @@ from .auth import DomainError
 from .models import (
     BankTransaction,
     BankTransactionSource,
+    Company,
     Document,
     FileOperation,
     Package,
@@ -444,13 +445,13 @@ def freeze_bank_export(company_id, periods, payments):
 def build_archive(snapshot, package_id, version):
     # Context-only sources are still protected financial data, including in supplements.
     for source in snapshot.get("export_sources", []):
-        doc = Document.objects.get(id=source["document_id"])
+        doc = Document.objects.only("id", "sha256").get(id=source["document_id"])
         if doc.sha256 != source["sha256"]:
             raise DomainError("Exportquelle wurde verändert.", 409)
         storage.read_original(doc)
     files = {}
     for d in snapshot["documents"]:
-        doc = Document.objects.get(id=d["id"])
+        doc = Document.objects.only("id").get(id=d["id"])
         data = storage.read_original(doc)
         if d["archive_path"] in files:
             raise DomainError("Doppelter Übergabepfad im Snapshot; kein Überschreiben erlaubt.", 409)
@@ -545,14 +546,21 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
 
 
 def package_sources(package):
-    expected = {str(item.document_id): item.sha256 for item in package.items.all()}
+    expected = {
+        str(identifier): sha256 for identifier, sha256 in package.items.values_list("document_id", "sha256")
+    }
     expected.update({s["document_id"]: s["sha256"] for s in package.snapshot.get("export_sources", [])})
     return expected
 
 
 def package_blockers(package):
     expected = package_sources(package)
-    documents = {str(d.id): d for d in Document.objects.filter(id__in=expected)}
+    documents = {
+        str(d.id): d
+        for d in Document.objects.filter(id__in=expected)
+        .only("id", "security_status", "security_error", "scanned_sha256", "sha256")
+        .iterator(chunk_size=100)
+    }
     blockers = []
     for identifier, sha256 in expected.items():
         doc = documents.get(identifier)
@@ -592,7 +600,12 @@ def require_package_safe(package):
             },
         )
     # Includes later on-disk tampering, not just recorded scanner findings.
-    for doc in Document.objects.filter(id__in=package_sources(package)):
+    for doc in (
+        Document.objects.filter(id__in=package_sources(package))
+        .only("id")
+        .order_by("id")
+        .iterator(chunk_size=100)
+    ):
         storage.read_original(doc)
 
 
@@ -600,9 +613,12 @@ def package_bytes(package):
     # Materialize the complete response under the same lock used by removal.
     # A download authorized before removal may finish; later requests get 410.
     with transaction.atomic():
-        # NO KEY UPDATE also serializes removal, but permits the KEY SHARE
-        # needed by a concurrent supplement's parent FK check. A full UPDATE
-        # lock deadlocks if that builder already holds our document locks.
+        # Match builders, removal and dispatch: company, package, then sources.
+        # A builder may already hold current-month documents before reading an
+        # older context source. Never let downloads hold that source while
+        # waiting for the builder's documents in the opposite order.
+        Company.objects.select_for_update().only("id").get(id=package.company_id)
+        # Keep parent FK KEY SHARE compatible with this package's removal guard.
         package = Package.objects.select_for_update(no_key=True).get(id=package.id)
         require_package_safe(package)
         data = storage.path(package.path).read_bytes()

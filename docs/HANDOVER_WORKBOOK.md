@@ -53,6 +53,8 @@ Firmen- und Kontogrenzen, kanonische Identitäten, Rückbuchungshistorie und Que
 
 Alle aus Belegen stammenden Texte werden als Literalzellen geschrieben, nie als Excel-Formeln. Ungültige XML-Steuerzeichen werden vor der Zellbelegung entfernt. Die Inhaltsliste prüft Originale, nicht die Arbeitsmappe selbst; die äußere ZIP-Prüfsumme bleibt am Paket gespeichert. Keine Makros, kein BMD-Import, keine Live-Kurse.
 
+Sicherheitsabfragen laden nur Kennungen, Hashes und Prüfstatus; Integritätsprüfungen lesen Originale einzeln ohne Parser-/Metadatenblobs oder einen Cache vollständiger Quelldokumente. Downloads erwerben wie Bau, Entfernung und Versand zuerst die Firmensperre und danach die Paketsperre, bevor sie Originalquellen prüfen. Dadurch können sie keine historische Quelle halten und zugleich auf bereits durch einen Nachtragsbau gesperrte aktuelle Belege warten.
+
 ## Datenschutz und Prüfung
 
 Echte Arbeitsmappen, ZIPs, Agentenzustände und Buchhaltungsdaten gehören nicht ins Repository. `.pi/`, `exports/`, `*.xlsx`, `*.xls` und `*.zip` sind ignoriert. Tests erzeugen ausschließlich synthetische Daten zur Laufzeit; keine reale Beispielarbeitsmappe wird committed.

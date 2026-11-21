@@ -69,6 +69,33 @@ def test_serialized_context_budget_is_also_checked(companies, settings, monkeypa
         packages.freeze_bank_export(companies[0].id, ["2026-10"], [])
 
 
+@pytest.mark.parametrize("phase", ["blockers", "detail", "download", "archive"])
+def test_package_safety_paths_do_not_fetch_parser_blobs(actor, companies, phase):
+    from accounting.models import Document
+
+    source = statement(actor, companies[0])
+    normalize(actor, source, auto=False)
+    Document.objects.filter(id=source["id"]).update(period="2026-09")
+    inv = invoice(actor, companies[0])
+    assign(actor, BankTransaction.objects.get(), inv)
+    created = packages.create_package(actor, companies[0].id, ["2026-10"], "slim-package-safety")
+    package = packages.get_package(actor, created["id"])
+    assert package.context_sources.filter(document_id=source["id"]).exists()
+    with CaptureQueriesContext(connection) as queries:
+        if phase == "blockers":
+            assert packages.package_blockers(package) == []
+        elif phase == "detail":
+            packages.package_data(package, True)
+        elif phase == "download":
+            assert packages.package_bytes(package)
+        else:
+            assert packages.build_archive(package.snapshot, package.id, package.version)
+    assert all("parser_result" not in query["sql"] for query in queries)
+    assert all('"accounting_document"."metadata"' not in query["sql"] for query in queries)
+    if phase != "detail":  # Detail deliberately returns frozen included-item metadata.
+        assert all('"accounting_packageitem"."metadata"' not in query["sql"] for query in queries)
+
+
 def test_bank_projection_does_not_fetch_source_parser_blobs(actor, companies):
     inv = invoice(actor, companies[0])
     normalize(actor, statement(actor, companies[0]), auto=False)
