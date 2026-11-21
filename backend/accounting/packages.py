@@ -8,19 +8,22 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max, OuterRef, Q, Subquery, Sum
+from django.db.models import F, Max, OuterRef, Prefetch, Q, Subquery, Sum, TextField
+from django.db.models.functions import Cast, Length
 from django.utils import timezone
 
 from . import naming, storage, workbook
 from .auth import DomainError
 from .models import (
     BankTransaction,
+    BankTransactionSource,
     Document,
     FileOperation,
     Package,
     PackageContextSource,
     PackageItem,
     PackageRemoval,
+    PaymentAllocation,
 )
 from .services import document_data, valid_period
 
@@ -279,6 +282,48 @@ def package_preview(actor, company_id, periods, parent_id=None, lock=False):
     }
 
 
+def bank_export_limit():
+    return DomainError(
+        "Bankexport überschreitet das Zeilen-/Datenlimit. Weniger Monate auswählen oder "
+        "MAX_WORKBOOK_BANK_ROWS/MAX_WORKBOOK_BANK_BYTES bewusst mit dem Arbeitsspeicher anpassen; "
+        "es werden keine Bewegungen abgeschnitten.",
+        413,
+    )
+
+
+def check_bank_export_budget(query):
+    """Bound row fan-out and variable text in SQL before materializing any bank objects."""
+    rows = query.count()
+    if rows > settings.MAX_WORKBOOK_BANK_ROWS:
+        raise bank_export_limit()
+    if not rows:
+        return
+    ids = query.values("id")
+    rows += PaymentAllocation.objects.filter(transaction_id__in=ids).count()
+    rows += BankTransaction.objects.filter(merged_into_id__in=ids).count()
+    rows += BankTransactionSource.objects.filter(
+        Q(transaction_id__in=ids) | Q(transaction__merged_into_id__in=ids)
+    ).count()
+    if rows > settings.MAX_WORKBOOK_BANK_ROWS:
+        raise bank_export_limit()
+    text = sum(
+        Length(Cast(field, TextField()))
+        for field in (
+            "remittance",
+            "references",
+            "issues",
+            "review_points",
+            "identity_review_points",
+            "bank_reference",
+            "party_name",
+            "party_iban",
+        )
+    )
+    # Four UTF-8 bytes per character is a conservative bound before fetching text.
+    if query.aggregate(characters=Sum(text, default=0))["characters"] * 4 > settings.MAX_WORKBOOK_BANK_BYTES:
+        raise bank_export_limit()
+
+
 def freeze_bank_export(company_id, periods, payments):
     """Capture both month movements and historical evidence for current invoice allocations.
 
@@ -298,10 +343,30 @@ def freeze_bank_export(company_id, periods, payments):
     for period in periods:
         year, month = map(int, period.split("-"))
         selected |= Q(booking_date__year=year, booking_date__month=month)
+    selected_transactions = BankTransaction.objects.filter(
+        company_id=company_id, merged_into__isnull=True
+    ).filter(selected)
+    check_bank_export_budget(selected_transactions)
+    source_documents = Document.objects.only(
+        "id", "company_id", "account_id", "security_status", "sha256", "scanned_sha256", "is_excluded"
+    )
+    allocation_documents = (
+        PaymentAllocation.objects.select_related("document")
+        .only(
+            "transaction_id",
+            "document_id",
+            "reversed_at",
+            "document__id",
+            "document__company_id",
+            "document__security_status",
+            "document__sha256",
+            "document__scanned_sha256",
+            "document__is_excluded",
+        )
+        .annotate(_export_number=F("document__metadata__number"))
+    )
     transactions = (
-        BankTransaction.objects.filter(company_id=company_id, merged_into__isnull=True)
-        .filter(selected)
-        .annotate(
+        selected_transactions.annotate(
             _active_amount=Sum(
                 "allocations__bank_amount",
                 filter=Q(allocations__reversed_at__isnull=True),
@@ -312,13 +377,22 @@ def freeze_bank_export(company_id, periods, payments):
             ),
         )
         .select_related("account", "merged_into", "identity_resolution")
+        .defer("identity_resolution__evidence")
         .prefetch_related(
-            "sources__document", "merged_duplicates__sources__document", "allocations__document"
+            Prefetch("sources__document", queryset=source_documents),
+            Prefetch(
+                "merged_duplicates",
+                queryset=BankTransaction.objects.only(
+                    "id", "merged_into_id", "company_id", "account_id"
+                ).prefetch_related(Prefetch("sources__document", queryset=source_documents)),
+            ),
+            Prefetch("allocations", queryset=allocation_documents),
         )
         .order_by("booking_date", "id")
     )
     monthly, allocated, notes, sources = [], [], [], {}
-    for tx in transactions:
+    serialized_bytes = 0
+    for tx in transactions.iterator(chunk_size=100):
         if tx.account.company_id != company_id:
             raise DomainError("Firmenfremdes Bankkonto; Export gesperrt.", 409)
         # A stored source exclusion is not undone by generating a workbook.
@@ -346,12 +420,18 @@ def freeze_bank_export(company_id, periods, payments):
             _require_clean_document(doc)
             sources[str(doc.id)] = {"document_id": str(doc.id), "sha256": doc.sha256}
             if not allocation.reversed_at and not doc.is_excluded:
-                data["invoice_references"].append(doc.metadata.get("number") or "Rechnung ohne Nummer")
+                data["invoice_references"].append(allocation._export_number or "Rechnung ohne Nummer")
         # transaction_data contains UUID source IDs; snapshots are JSON-serializable.
-        data = json.loads(json.dumps(data, default=str))
-        if data["booking_date"] and data["booking_date"][:7] in periods:
+        encoded = json.dumps(data, default=str)
+        data = json.loads(encoded)
+        in_month = bool(data["booking_date"] and data["booking_date"][:7] in periods)
+        in_context = str(tx.id) in context_ids
+        serialized_bytes += len(encoded.encode("utf-8")) * (int(in_month) + int(in_context))
+        if serialized_bytes > settings.MAX_WORKBOOK_BANK_BYTES:
+            raise bank_export_limit()
+        if in_month:
             monthly.append(data)
-        if str(tx.id) in context_ids:
+        if in_context:
             allocated.append(data)
     return {
         "bank_transactions": monthly,

@@ -41,6 +41,10 @@ Finanztabellen enthalten nur freigegebene, prüfpunktfreie, physisch abgelegte D
 
 Optionale Dezimalstrings: `quantity`, `gross`, `withholding_tax`, `net`, `bank_net`, `bank_fee`, `bank_credit`, `rate_original_per_bank`. Dazu `original_currency` und `bank_currency` als ISO-4217-Währungen. `metadata.isin` und `metadata.valuation_date` bleiben die bestehenden Felder. Quellensteuer wird nicht als Umsatzsteuer umgedeutet; Devisenspanne ist keine Rechnungszahlung. Ein unbekannter Kurs oder eine unbekannte Gebühr bleibt leer. Dieser Datensatz ist keine automatische Zuordnung zu einer Bankbewegung.
 
+## Ressourcenlimits
+
+Vorschau und Paketbau begrenzen abgeleitete Bankdaten separat von den Originalbytes: `MAX_WORKBOOK_BANK_ROWS` (Standard 10.000) zählt ausgewählte kanonische Bewegungen samt Zuordnungs-/Quellen-/Identitätskontext; `MAX_WORKBOOK_BANK_BYTES` (Standard 16 MiB) begrenzt variable Banktexte vor dem Laden und den tatsächlich serialisierten Bankkontext. Quellen werden mit schmalen Feldprojektionen statt vollständiger Parserblobs geladen, Bewegungen in begrenzten Batches verarbeitet. Bei Überschreitung folgt HTTP 413 vor Paketpersistenz; keine stille Kürzung, kein Teilpaket und kein Zahlungszustandswechsel. Weniger Monate wählen oder Limits nur bewusst mit Arbeitsspeicher und Jobtimeout anpassen. Diese Budgets ersetzen nicht `MAX_PACKAGE_BYTES` für Originale.
+
 ## Snapshot und Sicherheit
 
 Der Renderer `accounting/workbook.py` liest ausschließlich eingefrorene Daten, keine Live-DB. `package_preview` ergänzt `workbook_documents`, `bank_transactions`, `allocation_transactions` und `export_sources`; der Erstellungszeitpunkt wird erst beim tatsächlichen Paketbau eingefroren, sodass identische Vorschauen vergleichbar bleiben. Unveränderte Rechnungskontexte bleiben in reinen Zahlungsnachträgen lesbar, ohne Originale erneut zu liefern. Historische Bankbelege können eine Rechnung aus einer ausgewählten Periode decken, ohne historische Monate in die Klärliste aufzunehmen.
