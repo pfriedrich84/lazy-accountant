@@ -24,6 +24,7 @@ import {
 } from "@mui/material";
 import { api, type Company, post } from "../api";
 import { ErrorAlert, Loading } from "../components";
+import { Brand, BrandIcon } from "../brand";
 
 export interface AppContext {
   companyId: number | null;
@@ -62,15 +63,9 @@ function Login() {
       }}
     >
       <Paper sx={{ p: 5, maxWidth: 430, width: "100%" }}>
-        <Typography
-          color="primary"
-          sx={{
-            fontWeight: 800,
-            mb: 3,
-          }}
-        >
-          LAZY ACCOUNTANT
-        </Typography>
+        <Box sx={{ mb: 3 }}>
+          <Brand width={280} />
+        </Box>
         <Typography variant="h4" component="h1">
           Alles an einem Ort.
         </Typography>
@@ -184,17 +179,9 @@ export default function Shell() {
     <Box
       sx={{ p: 2, height: "100%", display: "flex", flexDirection: "column" }}
     >
-      <Typography
-        color="primary"
-        sx={{
-          fontWeight: 850,
-          letterSpacing: "-.03em",
-          p: 2,
-          mb: 2,
-        }}
-      >
-        lazy accountant<span style={{ color: "#bf743b" }}>.</span>
-      </Typography>
+      <Box sx={{ p: 1, mb: 2 }}>
+        <Brand />
+      </Box>
       <List>
         {navigation.map(([to, title, symbol]) => (
           <ListItemButton
@@ -277,6 +264,7 @@ export default function Shell() {
             >
               ☰
             </IconButton>
+            <BrandIcon />
             <FormControl size="small" sx={{ minWidth: { xs: 150, sm: 240 } }}>
               <InputLabel id="active-company-label">Firma</InputLabel>
               <Select
