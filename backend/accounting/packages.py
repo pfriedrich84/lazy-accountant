@@ -4,15 +4,24 @@ import json
 import uuid
 import zipfile
 from collections import Counter
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Max, OuterRef, Q, Subquery, Sum
 from django.utils import timezone
 
 from . import naming, storage, workbook
 from .auth import DomainError
-from .models import BankTransaction, Document, FileOperation, Package, PackageItem, PackageRemoval
+from .models import (
+    BankTransaction,
+    Document,
+    FileOperation,
+    Package,
+    PackageContextSource,
+    PackageItem,
+    PackageRemoval,
+)
 from .services import document_data, valid_period
 
 
@@ -278,14 +287,30 @@ def freeze_bank_export(company_id, periods, payments):
     """
     from .reconciliation import _all_bank_sources, _require_clean_document, transaction_data
 
-    allocated_ids = {a["transaction_id"] for p in payments for a in p.get("allocations", [])}
-    selected = Q(id__in=allocated_ids)
+    context_ids = {
+        identifier
+        for p in payments
+        for a in p.get("allocations", [])
+        for identifier in (a["transaction_id"], a.get("reversed_by_bank_transaction_id"))
+        if identifier
+    }
+    selected = Q(id__in=context_ids)
     for period in periods:
         year, month = map(int, period.split("-"))
         selected |= Q(booking_date__year=year, booking_date__month=month)
     transactions = (
         BankTransaction.objects.filter(company_id=company_id, merged_into__isnull=True)
         .filter(selected)
+        .annotate(
+            _active_amount=Sum(
+                "allocations__bank_amount",
+                filter=Q(allocations__reversed_at__isnull=True),
+                default=Decimal(0),
+            ),
+            _bank_reversal_id=Subquery(
+                BankTransaction.objects.filter(reversal_of=OuterRef("pk")).values("id")[:1]
+            ),
+        )
         .select_related("account", "merged_into", "identity_resolution")
         .prefetch_related(
             "sources__document", "merged_duplicates__sources__document", "allocations__document"
@@ -298,7 +323,7 @@ def freeze_bank_export(company_id, periods, payments):
             raise DomainError("Firmenfremdes Bankkonto; Export gesperrt.", 409)
         # A stored source exclusion is not undone by generating a workbook.
         if any(source.document.is_excluded for source in _all_bank_sources(tx)):
-            if str(tx.id) in allocated_ids:
+            if str(tx.id) in context_ids:
                 raise DomainError("Zahlungsquelle ist ausgeschlossen; Zuordnung vor Export prüfen.", 409)
             notes.append("Eine Bankbewegung mit ausgeschlossener Quelle wurde nicht exportiert.")
             continue
@@ -326,7 +351,7 @@ def freeze_bank_export(company_id, periods, payments):
         data = json.loads(json.dumps(data, default=str))
         if data["booking_date"] and data["booking_date"][:7] in periods:
             monthly.append(data)
-        if str(tx.id) in allocated_ids:
+        if str(tx.id) in context_ids:
             allocated.append(data)
     return {
         "bank_transactions": monthly,
@@ -424,6 +449,14 @@ def create_package(actor, company_id, periods, idempotency_key, parent_id=None):
                     metadata=d,
                 )
                 for d in snapshot["documents"]
+            ]
+        )
+        included_ids = {d["id"] for d in snapshot["documents"]}
+        PackageContextSource.objects.bulk_create(
+            [
+                PackageContextSource(package=p, document_id=source["document_id"])
+                for source in snapshot.get("export_sources", [])
+                if source["document_id"] not in included_ids
             ]
         )
         for period in p.periods:

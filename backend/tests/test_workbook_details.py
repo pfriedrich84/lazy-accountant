@@ -206,6 +206,15 @@ def test_historical_bank_source_in_payment_only_supplement_is_security_protected
     Document.objects.filter(id=source["id"]).update(scanned_sha256="0" * 64)
     with pytest.raises(DomainError, match="Sicherheitsprüfung"):
         packages.package_bytes(p)
+    from accounting.models import Dispatch
+    from accounting.security import affected
+
+    dispatch = Dispatch.objects.create(
+        package=p, actor_id=actor.user_id, idempotency_key="synthetic-impact", recipients=[]
+    )
+    impact = affected(Document.objects.get(id=source["id"]))
+    assert str(p.id) in impact["package_ids"]
+    assert str(dispatch.id) in impact["dispatch_ids"]
 
 
 def test_new_metadata_is_additive_and_does_not_change_bank_status(actor, companies):

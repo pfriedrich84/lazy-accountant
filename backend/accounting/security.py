@@ -14,7 +14,7 @@ from django_q.tasks import async_task
 
 from . import scanner, storage
 from .auth import DomainError
-from .models import Document, Package, ScanAttempt
+from .models import Document, Package, PackageContextSource, PackageItem, ScanAttempt
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,12 @@ def require_clean(doc):
 
 
 def affected(doc):
-    packages = Package.objects.filter(items__document=doc).distinct()
+    dependencies = (
+        PackageItem.objects.filter(document=doc)
+        .values("package_id")
+        .union(PackageContextSource.objects.filter(document=doc).values("package_id"))
+    )
+    packages = Package.objects.filter(id__in=dependencies)
     return {
         "package_ids": [str(p) for p in packages.values_list("id", flat=True)],
         "dispatch_ids": [str(p) for p in packages.values_list("dispatches__id", flat=True) if p],

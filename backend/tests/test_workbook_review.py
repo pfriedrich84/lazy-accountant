@@ -135,6 +135,84 @@ def test_explicit_followup_does_not_require_invoice_payment_status(kind):
     assert cases[0]["Zuständig"] == "Next month"
 
 
+def test_legacy_security_amounts_are_preserved_without_tax_reinterpretation():
+    doc = synthetic_document("legacy-security", kind="security_pdf")
+    entry = rows(render(base_snapshot([doc]))["Wertpapiere"])[0]
+    assert entry["Netto (Altmetadaten)"] == 10
+    assert entry["Steuer (Altmetadaten, nicht umgedeutet)"] == 2
+    assert entry["Brutto (Altmetadaten)"] == 12
+    assert entry["Quellensteuer Originalwährung"] is None
+
+
+def test_large_table_does_not_rescan_max_row_for_each_append(monkeypatch):
+    from openpyxl import Workbook
+    from openpyxl.worksheet.worksheet import Worksheet
+    from accounting.workbook import table
+
+    original = Worksheet.max_row.fget
+    calls = []
+    monkeypatch.setattr(Worksheet, "max_row", property(lambda sheet: calls.append(True) or original(sheet)))
+    table(Workbook(), "Synthetic", ["A", "B"], [["row", i] for i in range(1000)])
+    assert len(calls) < 10
+
+
+def test_bank_export_query_count_does_not_grow_per_movement(companies):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    from accounting.models import Account, BankTransaction
+
+    company = companies[0]
+    account = Account.objects.filter(company=company, kind="bank").first()
+
+    def movement(identity):
+        return BankTransaction(
+            company=company,
+            account=account,
+            identity=identity,
+            amount="10",
+            currency="EUR",
+            direction="CRDT",
+            booking_date="2026-10-15",
+            booked=True,
+        )
+
+    BankTransaction.objects.bulk_create([movement("initial")])
+    with CaptureQueriesContext(connection) as initial:
+        packages.freeze_bank_export(company.id, ["2026-10"], [])
+    BankTransaction.objects.bulk_create([movement(f"additional-{i}") for i in range(20)])
+    with CaptureQueriesContext(connection) as larger:
+        exported = packages.freeze_bank_export(company.id, ["2026-10"], [])
+    assert len(exported["bank_transactions"]) == 21
+    assert len(larger) <= len(initial) + 2
+
+
+def test_historical_reversal_and_its_source_remain_visible(actor, companies):
+    from accounting.models import BankTransaction, Document
+    from test_reconciliation import assign, camt, normalize, statement
+
+    inv = invoice(actor, companies[0])
+    original = statement(actor, companies[0], camt().replace(b"2026-10-15", b"2026-09-15"))
+    normalize(actor, original, auto=False)
+    assign(actor, BankTransaction.objects.get(), inv)
+    returned = statement(
+        actor, companies[0], camt(direction="DBIT", reversal=True).replace(b"2026-10-15", b"2026-11-15")
+    )
+    normalize(actor, returned)
+    reversal = BankTransaction.objects.get(reversal=True)
+    preview = packages.package_preview(actor, companies[0].id, ["2026-10"])
+    assert str(reversal.id) in {t["id"] for t in preview["allocation_transactions"]}
+    assert returned["id"] in {s["document_id"] for s in preview["export_sources"]}
+    row = rows(render(preview)["Zahlungszuordnungen"])[0]
+    assert row["Rückbuchungskennung (technisch)"] == str(reversal.id)
+    assert returned["id"] in row["Rückbuchungsquellen"]
+    assert row["Rückbuchungsdatum"].month == 11
+    Document.objects.filter(id=returned["id"]).update(security_status="infected")
+    from accounting.auth import DomainError
+
+    with pytest.raises(DomainError):
+        packages.package_preview(actor, companies[0].id, ["2026-10"])
+
+
 def test_manually_assigned_categories_survive_in_the_workbook():
     doc = synthetic_document("categorized")
     doc["category_name"] = "Synthetic business category"

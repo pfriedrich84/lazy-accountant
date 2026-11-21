@@ -67,14 +67,16 @@ def table(wb, title, headers, rows):
         cell.fill = PatternFill("solid", fgColor="173B50")
         cell.alignment = Alignment(vertical="center", wrap_text=True)
     ws.row_dimensions[5].height = 38
+    last_row = 5
     for row in rows:
-        if ws.max_row >= 1048576:
+        last_row += 1
+        if last_row > 1048576:
             raise DomainError("Zu viele Zeilen für Excel; weniger Monate auswählen.")
         ws.append([ILLEGAL.sub("", value)[:32767] if isinstance(value, str) else value for value in row])
     ws.freeze_panes = "D6" if len(headers) > 5 else "A6"
-    ws.auto_filter.ref = f"A5:{ws.cell(ws.max_row, len(headers)).coordinate}"
+    ws.auto_filter.ref = f"A5:{ws.cell(last_row, len(headers)).coordinate}"
     # Untrusted text is always literal, including formula-looking references.
-    for row in ws.iter_rows(min_row=6):
+    for row in ws.iter_rows(min_row=6, max_row=last_row):
         ws.row_dimensions[row[0].row].height = 44
         for cell in row:
             if isinstance(cell.value, str):
@@ -87,14 +89,14 @@ def table(wb, title, headers, rows):
             cell.font = Font(name="Calibri", size=11, color="233746")
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     for col, header in enumerate(headers, 1):
-        values = [str(ws.cell(i, col).value or "") for i in range(5, ws.max_row + 1)]
+        values = [str(ws.cell(i, col).value or "") for i in range(5, last_row + 1)]
         width = min(max(max(map(len, values), default=12) + 2, 14), 55)
         if header in {"Hinweise", "Begründung", "FX-Originaltext", "Verwendungszweck"}:
             width = 90
         if title == "Übersicht" and col == 2:
             width = 115
         ws.column_dimensions[ws.cell(5, col).column_letter].width = width
-    if ws.max_row > 5:
+    if last_row > 5:
         item = Table(displayName=f"Tabelle{len(wb.worksheets)}", ref=ws.auto_filter.ref)
         item.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
         ws.add_table(item)
@@ -333,8 +335,9 @@ def build_workbook(snapshot, package_id, version):
         links(ws, 18, selected)
         for index, d in enumerate(selected, 6):
             if (d["metadata"].get("settlement") or {}).get("review_note"):
-                for cell in ws[index]:
-                    cell.fill = PatternFill("solid", fgColor="FFF2CC")
+                for row in ws.iter_rows(min_row=index, max_row=index, max_col=len(invoice_headers)):
+                    for cell in row:
+                        cell.fill = PatternFill("solid", fgColor="FFF2CC")
 
     allocation_rows = []
     for p in payments.values():
@@ -342,6 +345,7 @@ def build_workbook(snapshot, package_id, version):
         m = d.get("metadata", {})
         for allocation in p.get("allocations", []):
             tx = transactions.get(allocation["transaction_id"], {})
+            reversal = transactions.get(allocation.get("reversed_by_bank_transaction_id"), {})
             fx = (allocation.get("evidence") or {}).get("fx") or {}
             evidence = fx.get("evidence") or {}
             principal = fx.get("bank_principal")
@@ -369,6 +373,18 @@ def build_workbook(snapshot, package_id, version):
                     evidence.get("quote", ""),
                     allocation.get("transaction_id"),
                     allocation.get("id"),
+                    day(reversal.get("booking_date")),
+                    reversal.get("bank_reference"),
+                    allocation.get("reversed_by_bank_transaction_id"),
+                    "; ".join(
+                        f"{s['document_id']}: {s['locator']}" for s in allocation.get("reversal_sources", [])
+                    ),
+                    "; ".join(
+                        f"{s['document_id']}: {s['locator']}" for s in allocation.get("bank_sources", [])
+                    ),
+                    number(reversal.get("amount")),
+                    reversal.get("currency"),
+                    reversal.get("direction"),
                 ]
             )
     table(
@@ -395,6 +411,14 @@ def build_workbook(snapshot, package_id, version):
             "FX-Originaltext",
             "Bankkennung (technisch)",
             "Zuordnungskennung (technisch)",
+            "Rückbuchungsdatum",
+            "Rückbuchungsreferenz",
+            "Rückbuchungskennung (technisch)",
+            "Rückbuchungsquellen",
+            "Zahlungsquellen",
+            "Rückbuchungsbetrag",
+            "Rückbuchungswährung",
+            "Rückbuchungsrichtung",
         ],
         allocation_rows,
     )
@@ -474,6 +498,10 @@ def build_workbook(snapshot, package_id, version):
             "Separate Spesen Bankwährung",
             "Kontogutschrift Bankwährung",
             "Kurs Originalwährung je Bankwährung",
+            "Währung (Altmetadaten)",
+            "Netto (Altmetadaten)",
+            "Steuer (Altmetadaten, nicht umgedeutet)",
+            "Brutto (Altmetadaten)",
         ],
         [
             [
@@ -496,6 +524,10 @@ def build_workbook(snapshot, package_id, version):
                 number((d["metadata"].get("security_income") or {}).get("bank_fee")),
                 number((d["metadata"].get("security_income") or {}).get("bank_credit")),
                 number((d["metadata"].get("security_income") or {}).get("rate_original_per_bank")),
+                d["metadata"].get("currency"),
+                number(d["metadata"].get("net")),
+                number(d["metadata"].get("tax")),
+                number(d["metadata"].get("gross")),
             ]
             for d in securities
         ],
