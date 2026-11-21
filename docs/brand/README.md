@@ -2,16 +2,18 @@
 
 ![Logo mit Wortmarke](lazy-accountant-logo.svg)
 
-**Status: abgestimmtes Logo, in der Produkt-README eingebunden; App-Integration folgt separat.** Das Zeichen greift auf ausdrücklichen Nutzerwunsch ArchiBots freundlichen Roboter auf, ist aber als flaches SVG neu gezeichnet. Keine Originalbildpixel, keine Nachzeichnung der dreidimensionalen Illustration. Das Belegmotiv mit Haken steht für delegierte Belegarbeit, nicht für eine steuerliche oder sicherheitstechnische Zertifizierung.
+**Status: abgestimmtes Logo, in Produkt-README und App eingebunden.** Das Zeichen greift auf ausdrücklichen Nutzerwunsch ArchiBots freundlichen Roboter auf, ist aber als flaches SVG neu gezeichnet. Keine Originalbildpixel, keine Nachzeichnung der dreidimensionalen Illustration. Das Belegmotiv mit Haken steht für delegierte Belegarbeit, nicht für eine steuerliche oder sicherheitstechnische Zertifizierung.
 
 ## Dateien
 
 - [`lazy-accountant-logo.svg`](lazy-accountant-logo.svg): transparente Wort-/Bildmarke für helle Hintergründe, 760 × 224.
-- [`lazy-accountant-icon.svg`](lazy-accountant-icon.svg): transparentes Logozeichen, 256 × 256; als App-Icon ab etwa 32 px. Für ein 16-px-Favicon sollte eine reduzierte Fassung erstellt werden.
+- [`lazy-accountant-icon.svg`](lazy-accountant-icon.svg): transparentes Logozeichen, 256 × 256; als App-Icon ab etwa 32 px. Für das Favicon verwendet die App die unten verlinkte reduzierte Fassung.
 - [`logo-preview.png`](logo-preview.png): im Browser gerenderte Vorschau mit Logo, Größenvergleich und Farben.
 - [`preview.html`](preview.html): lokale Vorschauseite ohne externe Ressourcen.
 
 Die Farben stammen aus der vorhandenen App: Grün `#175b50`, Kupfer `#bf743b`, ergänzt um Mint `#e3f0eb`. Die Wortmarke enthält SVG-Text mit `Trebuchet MS` / `DejaVu Sans` / `sans-serif`; ihre genaue Form hängt daher vom verfügbaren Font ab. Vor einer endgültigen Markenfreigabe kann die gewählte Schrift in Pfade umgewandelt werden. Das Icon ist vollständig fontunabhängig. Eine Dark-Mode-Variante ist noch nicht enthalten.
+
+Die App verwendet identische, von Vite gebündelte Kopien unter `frontend/app/assets/`. Der Test `frontend/tests/brand.test.tsx` prüft die Bytegleichheit mit diesen Originalen; Änderungen müssen beide Orte synchron aktualisieren. Die Wort-/Bildmarke erscheint auf der Anmeldung und in der Navigation, das Einzelzeichen im mobilen Kopfbereich. Das reduzierte [`favicon.svg`](../../frontend/app/assets/favicon.svg) lässt für kleine Größen den Beleg weg und behält Roboterkopf, Blick und kupferfarbene Antenne.
 
 ## Herkunft
 
