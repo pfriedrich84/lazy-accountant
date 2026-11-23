@@ -309,7 +309,7 @@ async def list_invoice_payment_statuses(
     search: str = "",
     as_of: str | None = None,
 ) -> dict[str, Any]:
-    """Firmenweite OP-Filter vor Pagination: all/open/overdue/unresolved/review/unmatched/paid/partially_paid; ER/AR, Suche, Stichtag. review_reasons erklärt Prüfbedarf. Keine Mahnungen."""
+    """Firmenweite OP-Filter vor Pagination: all/open/overdue/unresolved/review/unmatched/paid/partially_paid/no_payment_required; ER/AR, Suche, Stichtag. review_reasons erklärt Prüfbedarf. Keine Mahnungen."""
     from .reconciliation import list_invoice_statuses
 
     return await call(

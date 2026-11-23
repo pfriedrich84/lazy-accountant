@@ -54,6 +54,7 @@ export interface PaymentStatus {
   document_id: string;
   document_version: number;
   status: string;
+  payment_basis?: "zero_invoice" | "third_party_covered";
   currency?: string;
   paid?: string;
   remaining?: string;
@@ -87,6 +88,7 @@ export const paymentLabels: Record<string, string> = {
   partially_paid: "Teilweise bezahlt",
   paid: "Bezahlt",
   unresolved: "Ungeklärt",
+  no_payment_required: "Kein Zahlbetrag offen",
 };
 
 export function BankCandidates({ movement }: { movement: BankMovement }) {
@@ -307,8 +309,11 @@ export function PaymentPanel({
               Stand {status.data.as_of}
             </Alert>
             <Typography>
-              Bankdeckung: {status.data.bank_evidence}. Keine Zuordnung bedeutet
-              nicht nachgewiesenes Nichtbezahltsein.
+              {status.data.status === "no_payment_required"
+                ? status.data.payment_basis === "third_party_covered"
+                  ? "Laut Rechnung vollständig durch Dritte gedeckt. Kein eigener Bankzahlungsnachweis erforderlich."
+                  : "Nullrechnung. Kein Bankzahlungsnachweis erforderlich."
+                : `Bankdeckung: ${status.data.bank_evidence}. Keine Zuordnung bedeutet nicht nachgewiesenes Nichtbezahltsein.`}
             </Typography>
             {status.data.assessment_notes?.map((point) => (
               <Alert key={point} severity="warning">
@@ -362,150 +367,160 @@ export function PaymentPanel({
                 )}
               </Stack>
             ))}
-            <TextField
-              label="Bankbewegung für manuelle Zuordnung"
-              select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              <MenuItem value="">Bitte wählen</MenuItem>
-              {movements.data?.items.map((t) => (
-                <MenuItem key={t.id} value={t.id} disabled={!!t.merged_into_id}>
-                  {t.merged_into_id ? "Zusammengeführt · " : ""}
-                  {t.direction} · {t.available} {t.currency} · {t.party_name} ·{" "}
-                  {t.remittance.slice(0, 60)}
-                </MenuItem>
-              ))}
-            </TextField>
-            <Stack direction="row" spacing={1}>
-              <Button
-                disabled={!cursor}
-                onClick={() => {
-                  setCursor(Math.max(0, cursor - 50));
-                  setSelected("");
-                }}
-              >
-                Vorige Bewegungen
-              </Button>
-              <Button
-                disabled={movements.data?.next_cursor == null}
-                onClick={() => {
-                  setCursor(movements.data!.next_cursor!);
-                  setSelected("");
-                }}
-              >
-                Weitere Bewegungen
-              </Button>
-            </Stack>
-            {tx && (
+            {status.data.status !== "no_payment_required" && (
               <>
-                <Typography>
-                  Gebucht: {tx.booked ? "ja" : "nein"} · {tx.issues.join("; ")}
-                </Typography>
-                {!tx.merged_into_id && <BankCandidates movement={tx} />}
-              </>
-            )}
-            {tx && tx.currency !== doc.metadata.currency && (
-              <FXPayment
-                key={tx.id}
-                doc={doc}
-                movement={tx}
-                canProcess={!!canProcess}
-              />
-            )}
-            <TextField
-              label="Zuordnungsbetrag (Dezimalpunkt)"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            <TextField
-              label="Begründung für Zuordnung / Aufhebung / Bankdatenprüfung"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-            <Button
-              disabled={
-                !canProcess ||
-                !tx ||
-                !!tx.merged_into_id ||
-                tx.currency !== doc.metadata.currency ||
-                !amount ||
-                !reason.trim() ||
-                action.isPending
-              }
-              onClick={() =>
-                tx &&
-                action.mutate({
-                  operation: "allocate",
-                  payload: {
-                    transaction_id: tx.id,
-                    document_id: doc.id,
-                    amount,
-                    bank_version: tx.version,
-                    document_version: doc.version,
-                    reason,
-                    idempotency_key: idempotencyKey(),
-                  },
-                })
-              }
-            >
-              Bankbetrag manuell zuordnen
-            </Button>
-            {permissions.data?.permissions.admin && (
-              <>
-                {verifiedParties.data?.map((p) => (
-                  <Stack key={p.id} direction="row" spacing={1}>
+                <TextField
+                  label="Bankbewegung für manuelle Zuordnung"
+                  select
+                  value={selected}
+                  onChange={(e) => setSelected(e.target.value)}
+                >
+                  <MenuItem value="">Bitte wählen</MenuItem>
+                  {movements.data?.items.map((t) => (
+                    <MenuItem
+                      key={t.id}
+                      value={t.id}
+                      disabled={!!t.merged_into_id}
+                    >
+                      {t.merged_into_id ? "Zusammengeführt · " : ""}
+                      {t.direction} · {t.available} {t.currency} ·{" "}
+                      {t.party_name} · {t.remittance.slice(0, 60)}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    disabled={!cursor}
+                    onClick={() => {
+                      setCursor(Math.max(0, cursor - 50));
+                      setSelected("");
+                    }}
+                  >
+                    Vorige Bewegungen
+                  </Button>
+                  <Button
+                    disabled={movements.data?.next_cursor == null}
+                    onClick={() => {
+                      setCursor(movements.data!.next_cursor!);
+                      setSelected("");
+                    }}
+                  >
+                    Weitere Bewegungen
+                  </Button>
+                </Stack>
+                {tx && (
+                  <>
                     <Typography>
-                      {p.name} · {p.iban}
+                      Gebucht: {tx.booked ? "ja" : "nein"} ·{" "}
+                      {tx.issues.join("; ")}
                     </Typography>
+                    {!tx.merged_into_id && <BankCandidates movement={tx} />}
+                  </>
+                )}
+                {tx && tx.currency !== doc.metadata.currency && (
+                  <FXPayment
+                    key={tx.id}
+                    doc={doc}
+                    movement={tx}
+                    canProcess={!!canProcess}
+                  />
+                )}
+                <TextField
+                  label="Zuordnungsbetrag (Dezimalpunkt)"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+                <TextField
+                  label="Begründung für Zuordnung / Aufhebung / Bankdatenprüfung"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+                <Button
+                  disabled={
+                    !canProcess ||
+                    !tx ||
+                    !!tx.merged_into_id ||
+                    tx.currency !== doc.metadata.currency ||
+                    !amount ||
+                    !reason.trim() ||
+                    action.isPending
+                  }
+                  onClick={() =>
+                    tx &&
+                    action.mutate({
+                      operation: "allocate",
+                      payload: {
+                        transaction_id: tx.id,
+                        document_id: doc.id,
+                        amount,
+                        bank_version: tx.version,
+                        document_version: doc.version,
+                        reason,
+                        idempotency_key: idempotencyKey(),
+                      },
+                    })
+                  }
+                >
+                  Bankbetrag manuell zuordnen
+                </Button>
+                {permissions.data?.permissions.admin && (
+                  <>
+                    {verifiedParties.data?.map((p) => (
+                      <Stack key={p.id} direction="row" spacing={1}>
+                        <Typography>
+                          {p.name} · {p.iban}
+                        </Typography>
+                        <Button
+                          disabled={!reason.trim() || action.isPending}
+                          onClick={() =>
+                            action.mutate({
+                              operation: "revoke-party",
+                              payload: {
+                                company_id: doc.company_id,
+                                party_id: p.id,
+                                reason,
+                              },
+                            })
+                          }
+                        >
+                          Freigabe widerrufen
+                        </Button>
+                      </Stack>
+                    ))}
+                    <Alert severity="warning">
+                      Nur unabhängig geprüfte Bankdaten bestätigen. Dadurch
+                      können künftige eindeutige Referenztreffer automatisch
+                      zugeordnet werden. Keine IBAN allein aus einem neuen PDF
+                      übernehmen.
+                    </Alert>
+                    <TextField
+                      label="Verifizierte IBAN des Geschäftspartners"
+                      value={iban}
+                      onChange={(e) => setIban(e.target.value)}
+                    />
                     <Button
-                      disabled={!reason.trim() || action.isPending}
+                      disabled={!iban || !reason.trim() || action.isPending}
                       onClick={() =>
                         action.mutate({
-                          operation: "revoke-party",
+                          operation: "verify-party",
                           payload: {
                             company_id: doc.company_id,
-                            party_id: p.id,
+                            name:
+                              doc.metadata[
+                                doc.kind === "outgoing_invoice"
+                                  ? "recipient"
+                                  : "issuer"
+                              ] || "",
+                            iban,
                             reason,
                           },
                         })
                       }
                     >
-                      Freigabe widerrufen
+                      Gegenpartei/IBAN ausdrücklich verifizieren
                     </Button>
-                  </Stack>
-                ))}
-                <Alert severity="warning">
-                  Nur unabhängig geprüfte Bankdaten bestätigen. Dadurch können
-                  künftige eindeutige Referenztreffer automatisch zugeordnet
-                  werden. Keine IBAN allein aus einem neuen PDF übernehmen.
-                </Alert>
-                <TextField
-                  label="Verifizierte IBAN des Geschäftspartners"
-                  value={iban}
-                  onChange={(e) => setIban(e.target.value)}
-                />
-                <Button
-                  disabled={!iban || !reason.trim() || action.isPending}
-                  onClick={() =>
-                    action.mutate({
-                      operation: "verify-party",
-                      payload: {
-                        company_id: doc.company_id,
-                        name:
-                          doc.metadata[
-                            doc.kind === "outgoing_invoice"
-                              ? "recipient"
-                              : "issuer"
-                          ] || "",
-                        iban,
-                        reason,
-                      },
-                    })
-                  }
-                >
-                  Gegenpartei/IBAN ausdrücklich verifizieren
-                </Button>
+                  </>
+                )}
               </>
             )}
           </>

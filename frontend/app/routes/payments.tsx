@@ -134,6 +134,9 @@ function PaymentLists({ companyId }: { companyId: number | null }) {
                 <MenuItem key="partially_paid" value="partially_paid">
                   Teilweise bezahlt
                 </MenuItem>,
+                <MenuItem key="no_payment_required" value="no_payment_required">
+                  Kein Zahlbetrag offen
+                </MenuItem>,
                 <MenuItem key="paid" value="paid">
                   Bezahlt
                 </MenuItem>,

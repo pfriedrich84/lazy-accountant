@@ -75,6 +75,43 @@ describe("Bankabgleich", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["zero_invoice", /Nullrechnung\. Kein Bankzahlungsnachweis erforderlich/],
+    ["third_party_covered", /vollständig durch Dritte gedeckt/],
+  ])(
+    "zeigt %s ohne Zahlungsaufforderung oder Zuordnungsformular",
+    async (basis, explanation) => {
+      const original = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path, init) => {
+        const value = await original(path, init);
+        return path.includes("status/")
+          ? ({
+              ...(value as object),
+              status: "no_payment_required",
+              payment_basis: basis,
+              paid: "0",
+              remaining: "0",
+              due_date: null,
+              overdue: false,
+              bank_evidence: "not_required",
+            } as never)
+          : value;
+      });
+      panel();
+      expect(
+        await screen.findByText("Kein Zahlbetrag offen"),
+      ).toBeInTheDocument();
+      expect(screen.getByText(explanation)).toBeInTheDocument();
+      expect(screen.queryByText("Bezahlt")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Fälligkeit ungeklärt/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Bankbetrag manuell zuordnen" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
   it("warnt bei ungeklärter Rückbuchung trotz bisheriger Zahlungszuordnung", async () => {
     const original = vi.mocked(api).getMockImplementation()!;
     vi.mocked(api).mockImplementation(async (path, init) => {
