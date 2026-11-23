@@ -217,7 +217,7 @@ def test_historical_bank_source_in_payment_only_supplement_is_security_protected
     assert str(dispatch.id) in impact["dispatch_ids"]
 
 
-def test_new_metadata_is_additive_and_does_not_change_bank_status(actor, companies):
+def test_third_party_coverage_changes_requirement_without_creating_bank_payment(actor, companies):
     inv = invoice(actor, companies[0], kind="incoming_invoice")
     saved = services.save_result(
         actor,
@@ -237,6 +237,9 @@ def test_new_metadata_is_additive_and_does_not_change_bank_status(actor, compani
     assert saved["status"] == "ready" and saved["metadata"]["gross"] == "120.00"
     from accounting.reconciliation import payment_status
 
-    assert payment_status(actor, inv["id"])["paid"] == "0"
-    assert payment_status(actor, inv["id"])["status"] == "unpaid"
+    status = payment_status(actor, inv["id"])
+    assert status["paid"] == "0"
+    assert status["status"] == "no_payment_required"
+    assert status["bank_evidence"] == "not_required"
+    assert status["allocations"] == []
     assert Decimal(saved["metadata"]["settlement"]["covered_by_third_party"]) == 120

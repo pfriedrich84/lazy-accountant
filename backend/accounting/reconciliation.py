@@ -44,11 +44,17 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def money(value, currency):
+def money(value, currency, *, allow_zero=False):
     try:
         number = Decimal(str(value))
         exponent = Currency(currency).exponent
-        if exponent is None or not number.is_finite() or number <= 0 or number >= Decimal("1e14"):
+        if (
+            exponent is None
+            or not number.is_finite()
+            or number < 0
+            or (number == 0 and not allow_zero)
+            or number >= Decimal("1e14")
+        ):
             raise ValueError()
         if number != number.quantize(Decimal(1).scaleb(-exponent)):
             raise ValueError()
@@ -84,12 +90,41 @@ def _require_clean_sources(tx):
         _require_clean_document(source.document)
 
 
-def _invoice(doc):
+def no_payment_basis(metadata):
+    """Structured original facts only; a zero balance or free-text note is not payment.
+
+    Partial third-party coverage is not a supported offset. Never subtract it from
+    the invoice or infer coverage from 'Paid to Date' / 'Balance Due'.
+    """
+    currency = metadata.get("currency")
+    gross = money(metadata.get("gross"), currency, allow_zero=True)
+    settlement = metadata.get("settlement") or {}
+    if not isinstance(settlement, dict):
+        raise DomainError("Zahlbetragsangaben ungeklärt.")
+    due = settlement.get("amount_due")
+    covered = settlement.get("covered_by_third_party")
+    due = money(due, currency, allow_zero=True) if due is not None else None
+    covered = money(covered, currency, allow_zero=True) if covered is not None else None
+    if covered is not None and covered > 0:
+        if covered > gross or (due is not None and covered + due != gross):
+            raise DomainError("Drittdeckung und Zahlbetrag widersprechen dem Rechnungsbetrag.")
+        if covered == gross and due == 0:
+            return "third_party_covered"
+    if gross == 0:
+        if due not in (None, Decimal(0)):
+            raise DomainError("Nullrechnung mit widersprüchlichem Zahlbetrag.")
+        return "zero_invoice"
+    return None
+
+
+def _invoice(doc, *, for_status=False):
     _require_clean_document(doc)
     if doc.kind not in INVOICE_KINDS or not doc.company_id or doc.duplicate_of_id or doc.is_excluded:
         raise DomainError("Aktive Ein- oder Ausgangsrechnung erforderlich.")
     currency = doc.metadata.get("currency")
-    amount = money(doc.metadata.get("gross"), currency)
+    amount = money(doc.metadata.get("gross"), currency, allow_zero=True)
+    if not for_status and no_payment_basis(doc.metadata):
+        raise DomainError("Kein eigener Zahlbetrag offen; keine Bankzuordnung zulässig.", 409)
     return amount, currency
 
 
@@ -166,18 +201,48 @@ def status_for_document(doc, as_of=None):
         "data_note": "Keine Zuordnung bedeutet nicht nachgewiesenes Nichtbezahltsein.",
         "revision": digest(history),
     }
+    active = [a for a in rows if not a.reversed_at]
     try:
-        gross, currency = _invoice(doc)
+        gross, currency = _invoice(doc, for_status=True)
     except DomainError:
         return {**result, "status": "unresolved", "overdue": None, "bank_evidence": "unknown"}
-    active = [a for a in rows if not a.reversed_at]
-    paid = sum((a.amount for a in active), Decimal(0))
-    remaining = gross - paid
     due = doc.metadata.get("due_date")
     try:
         due_date = date.fromisoformat(due) if due else None
     except ValueError, TypeError:
         due_date = None
+    try:
+        basis = no_payment_basis(doc.metadata)
+        if basis and active:
+            raise DomainError("Bankzuordnung widerspricht Rechnung ohne eigenen Zahlbetrag.")
+    except DomainError as error:
+        return {
+            **result,
+            "status": "unresolved",
+            "overdue": None,
+            "bank_evidence": "unknown",
+            "assessment_notes": [str(error)],
+        }
+    if basis:
+        return {
+            **result,
+            "revision": digest(
+                {"history": history, "payment_basis": basis, "gross": str(gross), "currency": currency}
+            ),
+            "assessment_notes": [],
+            "status": "no_payment_required",
+            "payment_basis": basis,
+            "currency": currency,
+            "gross": str(gross),
+            "paid": "0",
+            "remaining": "0",
+            "due_date": due_date.isoformat() if due_date else None,
+            "overdue": False,
+            "bank_evidence": "not_required",
+            "assessment": "original-invoice-no-bank-payment-required",
+        }
+    paid = sum((a.amount for a in active), Decimal(0))
+    remaining = gross - paid
     disputed = any(_bank_notes(a.transaction) for a in active)
     return {
         **result,
@@ -368,7 +433,17 @@ def list_invoice_statuses(
 ):
     actor.require(company_id)
     cursor, limit, search = _list_options(cursor, limit, search)
-    if state not in {"all", "open", "overdue", "unresolved", "review", "unmatched", "paid", "partially_paid"}:
+    if state not in {
+        "all",
+        "open",
+        "overdue",
+        "unresolved",
+        "review",
+        "unmatched",
+        "paid",
+        "partially_paid",
+        "no_payment_required",
+    }:
         raise DomainError("Unbekannter Offene-Posten-Filter.")
     if kind is not None and kind not in INVOICE_KINDS:
         raise DomainError("Rechnungsart muss incoming_invoice oder outgoing_invoice sein.")
@@ -409,17 +484,18 @@ def list_invoice_statuses(
             reasons.append("Rechnungsbetrag oder Währung ungeklärt")
         if doc.status != "ready":
             reasons.append("Rechnung noch nicht bestätigt")
-        try:
-            date.fromisoformat(doc.metadata.get("due_date") or "")
-        except ValueError, TypeError:
-            reasons.append("Fälligkeit ungeklärt")
+        if row["status"] != "no_payment_required":
+            try:
+                date.fromisoformat(doc.metadata.get("due_date") or "")
+            except ValueError, TypeError:
+                reasons.append("Fälligkeit ungeklärt")
         row["review_reasons"] = sorted(set(reasons))
         return row
 
     def matches(row):
         return (
             state == "all"
-            or (state == "open" and row["status"] != "paid")
+            or (state == "open" and row["status"] not in {"paid", "no_payment_required"})
             or (state == "overdue" and row["overdue"] is True)
             or (state == "review" and bool(row["review_reasons"]))
             or (state == "unmatched" and row["status"] == "unpaid")
@@ -671,8 +747,12 @@ def _candidate_rows(tx):
                 reasons.append("Andere Währung")
             if remaining != tx.amount or _allocated(tx.allocations):
                 reasons.append("Betrag nicht eindeutig vollständig verfügbar")
-        except DomainError:
-            reasons.append("Rechnungsbetrag/Währung ungeklärt")
+        except DomainError as error:
+            reasons.append(
+                "Kein eigener Zahlbetrag offen"
+                if error.status == 409
+                else "Rechnungsbetrag/Währung ungeklärt"
+            )
         if not known or normalized_name(tx.party_name) != normalized_name(party):
             reasons.append("Gegenpartei/IBAN nicht widerspruchsfrei verifiziert")
         if doc.status != "ready" or doc.issues:
@@ -1069,6 +1149,12 @@ def guard_document_change(doc, result):
     financial = any(
         str(doc.metadata.get(k)) != str(getattr(result.metadata, k))
         for k in ("gross", "currency", "number", "issuer", "recipient")
+    )
+    old_settlement = doc.metadata.get("settlement") or {}
+    new_settlement = result.metadata.settlement
+    financial = financial or any(
+        str(old_settlement.get(k)) != str(getattr(new_settlement, k, None))
+        for k in ("amount_due", "covered_by_third_party")
     )
     if ((has_source or has_allocation) and structural) or (has_allocation and financial):
         raise DomainError("Finanziell referenziertes Dokument: Korrekturworkflow erforderlich.", 409)

@@ -28,6 +28,7 @@ STATUS = {
     "partially_paid": "Teilweise zugeordnet",
     "unpaid": "Keine Zuordnung vorhanden",
     "unresolved": "Zahlungsstand nicht beurteilbar",
+    "no_payment_required": "Kein Zahlbetrag offen",
 }
 ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -297,7 +298,14 @@ def build_workbook(snapshot, package_id, version):
         for d in selected:
             m, p = d["metadata"], payments.get(d["id"], {})
             status = STATUS.get(p.get("status"), "Keine eigenständige Rechnung / kein Zahlungsstatus")
-            status = settlement_status(m) or status
+            if p.get("status") == "no_payment_required":
+                status = (
+                    "Durch Dritte gedeckt – kein eigener Zahlbetrag"
+                    if p.get("payment_basis") == "third_party_covered"
+                    else "Nullbetrag – kein Bankzahlungsnachweis erforderlich"
+                )
+            elif not p.get("assessment_notes"):
+                status = settlement_status(m) or status
             settlement = m.get("settlement") or {}
             rows.append(
                 [
@@ -323,6 +331,7 @@ def build_workbook(snapshot, package_id, version):
                         "none": "Keine",
                         "disputed": "Strittig",
                         "unknown": "Ungeklärt",
+                        "not_required": "Nicht erforderlich",
                     }.get(p.get("bank_evidence"), "Nicht beurteilt"),
                     original(d),
                     m.get("note", ""),
@@ -553,7 +562,9 @@ def build_workbook(snapshot, package_id, version):
     for d in docs:
         m = d["metadata"]
         settlement = m.get("settlement") or {}
-        if settlement.get("review_note"):
+        if settlement.get("review_note") and (
+            payments.get(d["id"], {}).get("status") != "no_payment_required" or settlement.get("follow_up")
+        ):
             cases.append(
                 [
                     d["period"],
@@ -578,7 +589,9 @@ def build_workbook(snapshot, package_id, version):
                     "; ".join(p.get("assessment_notes") or []) or "Bankdeckung ist strittig.",
                 ]
             )
-        elif p.get("status") != "paid" and not settlement_status(m):
+        elif p.get("status") not in {"paid", "no_payment_required"} and (
+            not settlement_status(m) or p.get("assessment_notes")
+        ):
             cases.append(
                 [
                     p["period"],
@@ -586,7 +599,7 @@ def build_workbook(snapshot, package_id, version):
                     STATUS.get(p.get("status"), "Ungeklärt"),
                     "Zahlungsnachweis prüfen; fehlende Zuordnung beweist keine Nichtzahlung.",
                     "Bearbeitung",
-                    m.get("note", ""),
+                    "; ".join(p.get("assessment_notes") or []) or m.get("note", ""),
                 ]
             )
     for item in snapshot.get("blocked_imports", []):

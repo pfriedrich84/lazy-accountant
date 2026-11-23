@@ -28,6 +28,17 @@ Dies ist ein erster, separat prüfbarer Implementierungsstand, **keine vollstän
 - UI: firmenweiter Zahlungsstand und Bankbewegungsliste, getrennte Hinweise/Referenztreffer, Dokumentdetail mit Quellen, Zuordnung/Aufhebung, Admin-Bankdatenverifikation und CAMT-Abgleich. Listen sind paginiert; Filter/Suche wirken firmenweit vor der Seiteneinteilung. Die UI setzt die Position bei Filter-, Ansichts- und Firmenwechsel zurück.
 - Neue Pakete enthalten eine eingefrorene [Excel-Arbeitsmappe](HANDOVER_WORKBOOK.md) mit Rechnungs-, Zahlungszuordnungs- und Bankblättern statt separater Zahlungsstand-Dateien. Zahlungsänderungen erscheinen als `payment_changes` auch im Nachtrag bei unveränderter Dokumentrevision und ohne erneute Originaldatei. Alte ZIPs und Snapshots bleiben bytegleich.
 
+### Nullrechnungen und vollständige Drittdeckung
+
+Der gemeinsame Zahlungsstatus für REST, MCP, UI und neue Paketübersichten kennt zusätzlich `no_payment_required` (»Kein Zahlbetrag offen«), mit `bank_evidence=not_required`, `paid=0`, `remaining=0` und `overdue=false`. Das ist ausdrücklich **keine Bankzahlung** und nicht `paid`:
+
+- `payment_basis=zero_invoice`: gültiger Rechnungsbruttobetrag exakt 0 in der angegebenen ISO-Währung.
+- `payment_basis=third_party_covered`: strukturierte Originalangaben `settlement.amount_due=0` und `settlement.covered_by_third_party=gross`, mit positivem Rechnungsbrutto. Das ursprüngliche Rechnungsbrutto bleibt erhalten.
+
+Diese Belege bleiben in `all` und im eigenen Filter sichtbar, aber nicht in `open`, `unmatched`, `overdue` oder `paid`. Eine fehlende Fälligkeit erzeugt hier keinen Prüfpunkt. Andere Dokumentprüfpunkte bleiben sichtbar. Freitext, »Paid to Date« oder allein »Balance Due 0« bei positiver Rechnung genügen **nicht**. Teildeckung wird nicht automatisch verrechnet; widersprüchliche Deckungs-/Zahlbeträge bleiben ungeklärt. Eine explizite Wiedervorlage (`settlement.follow_up`) bleibt in neuen Arbeitsmappen erhalten; eine bloße Erläuterung vollständiger Drittdeckung erzeugt dort keinen offenen Zahlungsfall.
+
+Normale und FX-Zuordnungen verwenden denselben Guard und dürfen keinen Bankbetrag auf solche Belege verbrauchen. Zuordnungssummen bleiben streng positiv. Änderungen der strukturierten Zahlbetrags-/Deckungsangaben bei bereits vorhandener Zahlungshistorie benötigen den Korrekturworkflow (409), auch nach Aufhebung. Bereits vorhandene widersprüchliche Zuordnungen bleiben mit Historie als Prüffall sichtbar, statt automatisch entfernt zu werden. Originaldateien, gespeicherte Bankbewegungen und alte Paketsnapshots werden nicht verändert; keine Datenmigration oder künstliche Nullzahlung.
+
 ### Gemeinsame Referenz für Zinsen und Kontogebühren
 
 Die Abgleichprojektion `reconciliation-v2` erhält den ausdrücklich im CAMT angegebenen `BkTxCd` (Detail, sonst Buchung). Nur die Kombinationen **`ACMT/MCOP/INTR` mit CRDT** und **`ACMT/MDOP/COMM` mit DBIT** dürfen dieselbe Bankreferenz als zwei unterschiedliche Bewegungen desselben Firmenkontos verwenden. Der interne Schlüssel ergänzt dafür den Geschäftsvorfallcode; Originalreferenz und Originalbytes bleiben unverändert. Beträge, Daten, Zeilenpositionen oder bloße Gegenrichtung werden nicht als Ersatzkennung benutzt.
@@ -75,7 +86,7 @@ REST und MCP verwenden dieselben Dienste `accounting/reconciliation.py`, `bank_s
 
 Optionale Parameter gelten identisch für REST und die genannten MCP-Werkzeuge; ältere Aufrufe ohne Filter bleiben gültig:
 
-- Rechnungen: `state=all|open|overdue|unresolved|review|unmatched|paid|partially_paid`, `kind=incoming_invoice|outgoing_invoice`, `search` und `as_of=YYYY-MM-DD`.
+- Rechnungen: `state=all|open|overdue|unresolved|review|unmatched|paid|partially_paid|no_payment_required`, `kind=incoming_invoice|outgoing_invoice`, `search` und `as_of=YYYY-MM-DD`.
 - Bank: `state=all|open|unallocated|review|pending|reversed|merged`, optional `account_id`, `direction=CRDT|DBIT` und `search`. Fremde Konten liefern 404. `reversed` bezeichnet die durch Bankrückbuchung aufgehobene **Originalbewegung**, nicht jede ungeklärte Rückbuchungszeile.
 - `search` (max. 200 Zeichen) sucht Rechnungsnummer, Originalname und Rechnungspartei bzw. Verwendungszweck, Bankreferenz, Bankpartei und IBAN; keine unbeschränkte Volltext-/OCR-Suche.
 - `open` umfasst unbezahlte/teilbezahlte/ungeklärte Rechnungen; bei Bankbewegungen verfügbaren Rest **oder** Prüfbedarf. `unmatched` bezeichnet Rechnungen ohne aktive Zuordnung, nicht einen Nachweis des Nichtbezahltseins. `unallocated` bedeutet technisch verfügbarer Rest; pending/ungeklärte Quellen bleiben trotzdem durch die bestehenden Zuordnungsguards gesperrt.
