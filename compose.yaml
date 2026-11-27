@@ -25,7 +25,7 @@ x-app: &app
     MAX_WORKBOOK_BANK_ROWS: "${MAX_WORKBOOK_BANK_ROWS:-10000}"
     MAX_WORKBOOK_BANK_BYTES: "${MAX_WORKBOOK_BANK_BYTES:-16777216}"
     CLAMAV_HOST: clamav
-    CLAMAV_PORT: "3310"
+    CLAMAV_GATEWAY_PORT: "3311"
     CLAMAV_TIMEOUT: "${CLAMAV_TIMEOUT:-60}"
     CLAMAV_MAX_SIGNATURE_AGE: "${CLAMAV_MAX_SIGNATURE_AGE:-172800}"
   volumes:
@@ -51,16 +51,16 @@ services:
     restart: unless-stopped
 
   clamav:
-    # Latest stable checked via Cisco-Talos releases and Docker Hub (2026-11-19).
-    image: clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8
+    # Pinned upstream engine + private on-demand update/scan gateway.
+    build:
+      context: .
+      dockerfile: docker/clamav/Dockerfile
+    image: lazy-accountant-clamav:${APP_VERSION:-0.1.1}
     environment:
       TZ: Etc/UTC
-      FRESHCLAM_CHECKS: "24"
-      CLAMAV_MAX_SIGNATURE_AGE: "${CLAMAV_MAX_SIGNATURE_AGE:-172800}"
+      CLAMAV_TIMEOUT: "${CLAMAV_TIMEOUT:-60}"
     volumes:
       - clamav-signatures:/var/lib/clamav
-      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
-      - ./docker/clamav/healthcheck.sh:/healthcheck.sh:ro
     # No published ports and, deliberately, no document volume.
     mem_limit: 3g
     cpus: 2
@@ -68,7 +68,7 @@ services:
       test: ["CMD", "sh", "/healthcheck.sh"]
       interval: 30s
       timeout: 10s
-      start_period: 10m
+      start_period: 30s
       retries: 3
     restart: unless-stopped
 

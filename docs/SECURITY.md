@@ -12,9 +12,9 @@ Alle Web-/REST-Uploads, MCP-Dateitransfers und IMAP-Anhänge verwenden `services
 - `infected`: Fund mit Signaturname, Zeitpunkt und Engine-/Datenbankstand;
 - `error`: Scanner-/Signatur-/Limit-/Integritäts-/Format-/Parserfehler, **keine Freigabe**.
 
-Q2 transportiert Jobs; Dokument und `ScanAttempt` sind die dauerhafte Scan-Queue und das Audit. Queueverlust ist durch minütliche Wartung rekonstruierbar. Drei automatische Versuche, frühestens nach 300 Sekunden; Scan-Lease 240 Sekunden, danach sichtbarer Abbruch und begrenzte Wiederaufnahme. Ein verspäteter alter Worker darf keinen neueren Versuch freigeben. Bei ausgeschöpften Versuchen: im Dokument **Erneute Prüfung anfordern**, REST `POST /api/documents/<id>/scan/` oder MCP `rescan_document(document_id)`, jeweils mit Verarbeitungsberechtigung. Auch das ist **kein Override**: bis zum tatsächlichen erneuten Erfolg bleibt alles gesperrt. Funde werden nie automatisch gelöscht oder fachlich freigeschaltet.
+Q2 transportiert Jobs; Dokument und `ScanAttempt` sind die dauerhafte Scan-Queue und das Audit. Queueverlust ist durch minütliche Wartung rekonstruierbar. Drei automatische Versuche, frühestens nach 300 Sekunden; Scan-Lease 300 Sekunden, danach sichtbarer Abbruch und begrenzte Wiederaufnahme. Ein verspäteter alter Worker darf keinen neueren Versuch freigeben. Bei ausgeschöpften Versuchen: im Dokument **Erneute Prüfung anfordern**, REST `POST /api/documents/<id>/scan/` oder MCP `rescan_document(document_id)`, jeweils mit Verarbeitungsberechtigung. Auch das ist **kein Override**: bis zum tatsächlichen erneuten Erfolg bleibt alles gesperrt. Funde werden nie automatisch gelöscht oder fachlich freigeschaltet.
 
-Die Scannerantwort `stream: OK` ist die einzige akzeptierte unauffällige Antwort. Fehler, unbekannte/abgeschnittene Antworten und Streamlimits bleiben gesperrt. `AlertExceedsMax` und `AlertEncrypted*` liefern für unvollständige Prüfung `Heuristics.Limits.*` bzw. `Heuristics.Encrypted.* FOUND`; diese werden als `error` behandelt. Andere Funde sind `infected`. Signaturen werden vor und nach INSTREAM auf ihr **von clamd geladenes** Datum geprüft, nicht nur auf die Existenz einer heruntergeladenen Datei.
+Die Scannerantwort `stream: OK` ist die einzige akzeptierte unauffällige Antwort. Fehler, unbekannte/abgeschnittene Antworten und Streamlimits bleiben gesperrt. `AlertExceedsMax` und `AlertEncrypted*` liefern für unvollständige Prüfung `Heuristics.Limits.*` bzw. `Heuristics.Encrypted.* FOUND`; diese werden als `error` behandelt. Andere Funde sind `infected`. Das Gateway erfasst den **von clamd geladenen** Stand vor und nach INSTREAM. Die App prüft beide Antworten auf das Signaturdatum, bevor sie Bytes freigibt; die bloße Existenz einer heruntergeladenen Datei genügt nicht.
 
 ## Freigabe und Zugriffe
 
@@ -28,15 +28,17 @@ Paketvorschau weist Sicherheitsfälle vor fachlichen Ausschlüssen/Nachtragsverg
 
 ## ClamAV betreiben
 
-ClamAV **1.5.5**, GPL-2.0, stabiles offizielles Release, Image mit Digest in `compose.yaml` gepinnt. Quellen: [Cisco-Talos Release](https://github.com/Cisco-Talos/clamav/releases/tag/clamav-1.5.5), [Docker Hub Tag](https://hub.docker.com/r/clamav/clamav/tags?name=1.5.5), [offizielle Konfigurationsvorlage](https://github.com/Cisco-Talos/clamav/blob/clamav-1.5.5/etc/clamd.conf.sample). Bei Versionsupdates Scanlimits, Heuristikantworten und echte Integrationstests erneut prüfen.
+ClamAV **1.5.5**, GPL-2.0, stabiles offizielles Release, Basisimage mit Digest in `docker/clamav/Dockerfile` gepinnt; darauf läuft ein privates Python-Update-/Scangateway. Quellen: [Cisco-Talos Release](https://github.com/Cisco-Talos/clamav/releases/tag/clamav-1.5.5), [Docker Hub Tag](https://hub.docker.com/r/clamav/clamav/tags?name=1.5.5), [offizielle Konfigurationsvorlage](https://github.com/Cisco-Talos/clamav/blob/clamav-1.5.5/etc/clamd.conf.sample). Bei Versionsupdates Scanlimits, Heuristikantworten und echte Integrationstests erneut prüfen.
 
-- Separater Compose-Service `clamav`, kein veröffentlichter Scanner-Port, kein Dokumentmount; ausschließlich interne App-Verbindung zu Port 3310.
-- Persistentes Volume `clamav-signatures`; `freshclam` prüft 24-mal täglich. Nur Signatur-/Softwareupdates gehen nach außen, **keine Dokumentinhalte**. DNS/HTTPS zu den ClamAV-Updatequellen zulassen.
-- Maximal zulässiges Signaturalter: **48 Stunden** (`CLAMAV_MAX_SIGNATURE_AGE=172800`, Sekunden). Gleicher Wert für App und Healthcheck. Systemuhren müssen stimmen, Scanner läuft in UTC.
+- Separater Compose-Service `clamav`, kein veröffentlichter Port, kein Dokumentmount. Die App sendet Bytes ausschließlich an das private HTTP-Gateway auf Port 3311; clamd-Port 3310 bindet nur an Container-Loopback. Das Gateway läuft als `clamav`, bekommt keine App-/Datenbankgeheimnisse und speichert keine Dokumentbytes.
+- Persistentes Volume `clamav-signatures`; **Updates ausschließlich unmittelbar vor einem Scan**: einmaliger `freshclam`-Aufruf, danach Laden geänderter Datenbanken, dann INSTREAM. Kein FreshClam-Daemon, kein Update bei Containerstart, kein Zeitplan und kein Update durch Healthchecks. Auch ein Scan bei leerem Signaturvolume löst zuerst den Download aus. Der erste Scan nach einer Pause kann entsprechend länger dauern.
+- Update und Scan sind gemeinsam serialisiert. Gleichzeitig eintreffende Scans teilen den laufenden erfolgreichen Updatevorgang; spätere, sequenzielle Scans prüfen erneut. Bei unveränderter Datenbank läuft clamd weiter; bei geänderten Signaturdateien wird clamd unter demselben Lock neu gestartet. Ein laufender Scan wird dabei nicht unterbrochen, und erst ein antwortender neuer Prozess erhält Dokumentbytes.
+- Nur Signaturupdates gehen nach außen, **keine Dokumentinhalte**. DNS/HTTPS zu den ClamAV-Updatequellen zulassen; FreshClam verwaltet seine eigenen CDN-Cooldowns. Updatefehler, auch bei noch vorhandenen Signaturen, führen zum gesperrten Fehlerzustand statt zu einem direkten clamd-Fallback. Diagnose: `docker compose logs clamav`.
+- Maximal zulässiges Signaturalter: **48 Stunden** (`CLAMAV_MAX_SIGNATURE_AGE=172800`, Sekunden). Die App prüft beide vom Gateway gelieferten VERSION-Antworten (vor/nach INSTREAM) vor einer Freigabe. Systemuhren müssen stimmen, Scanner läuft in UTC.
 - Containerlimit **3 GiB RAM / 2 CPUs**. Für den Gesamtstack mindestens etwa **6 GiB RAM**, CPU und ausreichend Platz für Daten, Backups und Signaturen vorsehen. Signaturreloads können vorübergehend deutlich mehr RAM als der Ruhezustand brauchen. OOM/Reload-Ausfälle bleiben geschlossen; Logs/Healthcheck überwachen.
 - `StreamMaxLength`/`MaxFileSize`: **25 MiB**, Uploadlimit höchstens 25 MiB; `MaxScanSize`: 100 MiB, Rekursion 16, höchstens 1000 enthaltene Dateien. `MaxScanTime`: 45 Sekunden, Clienttimeout standardmäßig 60 Sekunden. Uploadlimit kann verkleinert, aber nicht ohne Code-/Konfigurationsprüfung vergrößert werden.
-- Zwei Scannerthreads, Queue vier; zwei App-Worker. Keine zufälligen separaten Scanprozesse pro Upload. Bei Last warten weitere dauerhafte Importfälle sicher auf Verarbeitung.
-- Healthcheck prüft clamd-Bereitschaft und geladenes Signaturalter, Initialisierung bis zehn Minuten. App bleibt bei Scannerstörungen für Metadaten/Fehlerbehebung erreichbar; **keine Fallback-Freigabe**, auch wenn App-Health grün ist.
+- Zwei interne Scannerthreads, Queue vier; zwei App-Worker. Das Gateway führt jeweils nur einen Update-/Scanablauf aus. FreshClam ist auf 120 Sekunden, das Laden auf 45 Sekunden und der HTTP-Client auf 240 Sekunden begrenzt; bei Last/Timeout bleiben Importfälle gesperrt und können erneut geprüft werden.
+- Healthcheck prüft nur die Erreichbarkeit des Gateways, nicht das Signaturalter: Im Leerlauf dürfen Datenbanken alt oder noch nicht vorhanden sein. Ein grüner Healthcheck ist **kein Nachweis eines erfolgreichen Updates oder Scans**. App bleibt bei Scannerstörungen für Metadaten/Fehlerbehebung erreichbar; **keine Fallback-Freigabe**.
 
 ```sh
 docker compose ps
@@ -58,8 +60,10 @@ Backup sichert Datenbank samt Audit und **gesamtes** Dokumentvolume einschließl
 
 ```sh
 uv run pytest -q                         # simulierte Scannerantworten + Regression
-# Separates echtes clamd mit docker/clamav/clamd.conf, frischen Signaturen:
-RUN_CLAMAV_TESTS=1 CLAMAV_HOST=127.0.0.1 CLAMAV_PORT=13310 uv run pytest -q -m clamav
+# Separates echtes Gateway mit Produktionskonfiguration (Updates erst beim Scan):
+docker build -f docker/clamav/Dockerfile -t clamav-on-demand .
+docker run -d --name clamav-integration -p 127.0.0.1:13311:3311 clamav-on-demand
+RUN_CLAMAV_TESTS=1 CLAMAV_HOST=127.0.0.1 CLAMAV_GATEWAY_PORT=13311 uv run pytest -q -m clamav
 ```
 
 Echte Tests prüfen INSTREAM, PDF/Bild/CAMT, EICAR über REST, den tatsächlichen MCP-Transport und IMAP, verschlüsselte PDF sowie überschrittene Streamlimits. Service-Tests ergänzen Ausfall, Timeout, veraltete Signaturen, Heuristiklimits, nicht eindeutige Antworten, Zustands-/Zugriffssperren, Wiederaufnahme, identische Reimporte, Manipulation während/nach Scan und spätere Paketsperren ohne Snapshotänderung. CI startet den gepinnten Scanner mit Produktionskonfiguration; Compose-Smoke prüft außerdem, dass weder Scanner-Port noch Dokumentvolume öffentlich/mit dem Scanner geteilt werden. Browser-Smoke prüft die Quarantäneanzeige mit EICAR.

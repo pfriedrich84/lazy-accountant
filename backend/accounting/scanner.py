@@ -1,9 +1,8 @@
-"""Local clamd protocol only. An incomplete or ambiguous answer is never clean."""
+"""Private on-demand update/scan gateway. Ambiguous answers are never clean."""
 
+import json
 import re
-import socket
-import struct
-import time
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -22,41 +21,7 @@ class Verdict:
     reason: str = ""
 
 
-def command(name, data=None):
-    deadline = time.monotonic() + settings.CLAMAV_TIMEOUT
-    with socket.create_connection(
-        (settings.CLAMAV_HOST, settings.CLAMAV_PORT), timeout=settings.CLAMAV_TIMEOUT
-    ) as sock:
-
-        def send(chunk):
-            sock.settimeout(max(0.001, deadline - time.monotonic()))
-            sock.sendall(chunk)
-
-        send(b"z" + name.encode("ascii") + b"\0")
-        if data is not None:
-            for offset in range(0, len(data), 65536):
-                chunk = data[offset : offset + 65536]
-                send(struct.pack("!I", len(chunk)) + chunk)
-            send(struct.pack("!I", 0))
-        answer = bytearray()
-        while len(answer) < 4096:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ScanError("Scanner-Zeitlimit überschritten.")
-            sock.settimeout(remaining)
-            chunk = sock.recv(4096 - len(answer))
-            if not chunk:
-                break
-            answer.extend(chunk)
-            if b"\0" in answer:
-                if not answer.endswith(b"\0") or answer.count(b"\0") != 1:
-                    raise ScanError("Mehrdeutige Scannerantwort.")
-                return answer[:-1].decode("ascii", errors="strict")
-        raise ScanError("Unvollständige Scannerantwort.")
-
-
-def readiness():
-    version = command("VERSION")
+def readiness(version):
     match = re.fullmatch(r"ClamAV ([^/\s]+)/([0-9]+)/(.+)", version)
     if not match or int(match[2]) <= 0:
         raise ScanError("Scanner ohne vertrauenswürdigen Signaturstand.")
@@ -70,14 +35,34 @@ def readiness():
     return version
 
 
+def exchange(data):
+    # The private gateway serializes update + database load + scan. No direct
+    # clamd fallback is permitted when the update service fails.
+    request = urllib.request.Request(
+        f"http://{settings.CLAMAV_HOST}:{settings.CLAMAV_GATEWAY_PORT}/scan",
+        data=data,
+        headers={"Content-Type": "application/octet-stream"},
+        method="POST",
+    )
+    # Never send private document bytes through an environment-configured proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=240) as response:
+        result = json.loads(response.read(16385))
+    if not isinstance(result, dict) or any(
+        not isinstance(result.get(key), str) for key in ("before", "answer", "after")
+    ):
+        raise ScanError("Ungültige Antwort des Update-/Scandienstes.")
+    return result["before"], result["answer"], result["after"]
+
+
 def scan(data):
     engine = ""
     try:
-        engine = readiness()
-        answer = command("INSTREAM", data)
+        before, answer, after = exchange(data)
+        engine = readiness(before)
         if any(ord(char) < 32 or ord(char) > 126 for char in answer):
             raise ScanError("Mehrdeutige Scannerantwort.")
-        readiness()  # Do not release across expired signatures / failed reloads.
+        readiness(after)  # Do not release across expired signatures / failed reloads.
         if answer == "stream: OK":
             return Verdict("clean", engine)
         if answer.startswith("stream: ") and answer.endswith(" FOUND"):
@@ -94,4 +79,8 @@ def scan(data):
         return Verdict("error", engine, reason=str(exc))
     except OSError, ValueError:
         # Never persist arbitrary scanner replies (they may contain input data).
-        return Verdict("error", engine, reason="Scanner nicht erreichbar, Zeitlimit oder ungültige Antwort.")
+        return Verdict(
+            "error",
+            engine,
+            reason="Signaturupdate/Scanner fehlgeschlagen, nicht erreichbar oder Zeitlimit überschritten.",
+        )

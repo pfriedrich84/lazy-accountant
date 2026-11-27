@@ -21,7 +21,7 @@ Prüfzeitpunkt: **2026-11-18, ab 20:27 UTC**. Ausschließlich stabile Releases. 
 | uv (Lockfile/Containerinstallation) | 0.13.9 |
 | ISO-4217-Währungsdaten | iso4217 1.16.20260101 |
 | Kontrollierter Mailtest | GreenMail 2.1.15 |
-| Lokaler Malware-Scanner | ClamAV 1.5.5 (GPL-2.0, Image-Digest in Compose) |
+| Lokaler Malware-Scanner | ClamAV 1.5.5 (GPL-2.0, Basisimage-Digest in `docker/clamav/Dockerfile`, Python-Standardbibliothek für das private On-Demand-Gateway) |
 
 Alle direkten Python-Abhängigkeiten stehen exakt in `pyproject.toml`, alle transitiven Auflösungen einschließlich Hashes in `uv.lock`. Frontend: exakte Versionen in `frontend/package.json`, transitive Auflösung/Integritäten in `frontend/package-lock.json`. Container-Basisimages erhalten Versions- und Digest-Pins.
 

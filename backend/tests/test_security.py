@@ -166,10 +166,7 @@ def test_eicar_all_channels_and_identical_reimport(client, actor, companies, cha
     ],
 )
 def test_strict_scanner_responses(answer, expected):
-    def command(name, data=None):
-        return ENGINE if name == "VERSION" else answer
-
-    with patch.object(scanner, "command", side_effect=command):
+    with patch.object(scanner, "exchange", return_value=(ENGINE, answer, ENGINE)):
         verdict = scanner.scan(EICAR)
     assert verdict.result == expected
 
@@ -183,13 +180,13 @@ def test_strict_scanner_responses(answer, expected):
     ],
 )
 def test_missing_and_stale_signatures(version):
-    with patch.object(scanner, "command", return_value=version):
+    with patch.object(scanner, "exchange", return_value=(version, "stream: OK", version)):
         assert scanner.scan(EICAR).result == "error"
 
 
 @pytest.mark.parametrize("failure", [ConnectionRefusedError(), TimeoutError()])
 def test_unavailable_scanner_fails_closed(failure):
-    with patch.object(scanner, "command", side_effect=failure):
+    with patch.object(scanner, "exchange", side_effect=failure):
         assert scanner.scan(EICAR).result == "error"
 
 

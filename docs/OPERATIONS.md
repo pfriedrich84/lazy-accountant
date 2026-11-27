@@ -5,7 +5,7 @@
 - `app`: Django/DRF, gebautes React-SPA, Django Admin, offizieller MCP-ASGI-Mount. Ein Uvicorn-Prozess; kein Node-Server im Betrieb.
 - `worker`: dieselbe Codebasis, separater Django-Q2-Cluster mit zwei Workern; ORM-Broker in PostgreSQL.
 - `db`: PostgreSQL 18.7, nur im Compose-Netz, benanntes Volume unter `/var/lib/postgresql` (Layout von PostgreSQL 18).
-- `clamav`: lokaler ClamAV 1.5.5 + freshclam, privater INSTREAM-Port, persistentes Signaturvolume, 3 GiB/2 CPUs. Kein Dokumentmount. Vollständiger Betrieb, Limits, Signaturalter, Quarantäne-/Löschregeln und Upgradeablauf: **[SECURITY.md](SECURITY.md)**.
+- `clamav`: lokaler ClamAV 1.5.5 mit privatem Update-/Scangateway (Port 3311), persistentes Signaturvolume, 3 GiB/2 CPUs. FreshClam läuft ausschließlich unmittelbar vor einem Scan, nicht periodisch und nicht beim Start. Kein Dokumentmount. Vollständiger Betrieb, Limits, Signaturalter, Quarantäne-/Löschregeln und Upgradeablauf: **[SECURITY.md](SECURITY.md)**.
 - `mail-test`: ausschließlich optionales Profil `test-mail`, GreenMail 2.1.15 mit **synthetischen** Testzugängen und loopbackgebundenen Ports. Nicht für echte Firmenpost verwenden.
 
 ### Dokumentvolume und späterer Netzwerkspeicher
