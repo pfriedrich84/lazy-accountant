@@ -1,8 +1,8 @@
 """Private scan gateway: no timer, no startup downloads, no document persistence.
 
-All scans share one lock covering update, database loading and INSTREAM. A scan
-arriving during an update shares that successful update rather than starting a
-second one. Sequential scans each check for updates (FreshClam honors CDN cooldowns).
+All scans share one lock covering updates, database loading and INSTREAM.
+An on-demand update check is reused for an hour after success to avoid
+unnecessary FreshClam calls during imports.
 """
 
 import json
@@ -22,6 +22,11 @@ SCAN_TIMEOUT = int(os.getenv("CLAMAV_TIMEOUT", "60"))
 if not 1 <= SCAN_TIMEOUT <= 60:
     raise ValueError("CLAMAV_TIMEOUT must be between 1 and 60 seconds")
 DATABASE = Path("/var/lib/clamav")
+UPDATE_INTERVAL = 3600  # FreshClam CDN recommends at most one update check per hour.
+
+
+class UpdateCooldown(RuntimeError):
+    pass
 
 
 def command(name, data=None):
@@ -61,7 +66,7 @@ def database_state():
 class Scanner:
     def __init__(self):
         self.lock = threading.Lock()
-        self.updated_at = 0
+        self.updated_at = None
         self.loaded_state = None
         self.process = None
 
@@ -78,9 +83,22 @@ class Scanner:
 
     def update(self):
         # One-shot mode only. Never launch freshclam --daemon.
-        subprocess.run(
-            ["freshclam", "--config-file=/etc/clamav/freshclam.conf", "--stdout"], check=True, timeout=120
+        result = subprocess.run(
+            ["freshclam", "--config-file=/etc/clamav/freshclam.conf", "--stdout"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
         )
+        # FreshClam runs before INSTREAM and cannot log document contents. Keep
+        # its operational diagnostics available in the container logs.
+        output = result.stdout.decode(errors="replace")
+        if output:
+            print(output.rstrip(), flush=True)
+        # FreshClam 1.5.5 can return success both when first rate-limited and
+        # when an existing CDN cooldown skips the check entirely.
+        if "on cool-down until after:" in output:
+            raise UpdateCooldown("FreshClam CDN cooldown")
+        result.check_returncode()
 
     def load(self):
         state = database_state()
@@ -106,16 +124,15 @@ class Scanner:
             self.loaded_state = state
 
     def scan(self, data):
-        arrived = time.monotonic()
         if not self.lock.acquire(timeout=240):
             raise TimeoutError("Scanner busy")
         try:
-            if self.updated_at < arrived:
+            needs_update = self.updated_at is None or time.monotonic() - self.updated_at >= UPDATE_INTERVAL
+            if needs_update:
                 self.update()  # Any failure prevents INSTREAM, even with cached signatures.
-                self.load()
+            self.load()
+            if needs_update:
                 self.updated_at = time.monotonic()
-            else:
-                self.load()
             before = command("VERSION")
             answer = command("INSTREAM", data)
             after = command("VERSION")
@@ -151,6 +168,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(data) != size:
                 raise ValueError("Incomplete scan request")
             self.respond(200, self.server.scanner.scan(data))
+        except UpdateCooldown:
+            self.respond(503, {"error": "signature_update_cooldown"})
         except Exception as exc:
             # Exception messages (e.g. decoder errors) can contain scanner input.
             # FreshClam already prints its own credential-free update diagnostics.

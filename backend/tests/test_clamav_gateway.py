@@ -29,13 +29,12 @@ def test_idle_does_not_update_or_start_clamd():
         patch.object(gateway.subprocess, "run") as update,
         patch.object(gateway.subprocess, "Popen") as start,
     ):
-        scanner = gateway.Scanner()
-        assert scanner.updated_at == 0
+        gateway.Scanner()
         update.assert_not_called()
         start.assert_not_called()
 
 
-def test_update_then_load_then_scan_every_sequential_request():
+def test_update_then_load_then_scan_reuses_recent_success():
     scanner = gateway.Scanner()
     events = []
     scanner.update = lambda: events.append("update")
@@ -45,10 +44,34 @@ def test_update_then_load_then_scan_every_sequential_request():
         events.append(name)
         return "stream: OK" if name == "INSTREAM" else "version"
 
-    with patch.object(gateway, "command", side_effect=command):
-        for _ in range(2):
+    with (
+        patch.object(gateway, "command", side_effect=command),
+        patch.object(gateway.time, "monotonic", side_effect=lambda: now),
+    ):
+        for now in (100, 101, 3700):
             assert scanner.scan(b"example")["answer"] == "stream: OK"
-    assert events == ["update", "load", "VERSION", "INSTREAM", "VERSION"] * 2
+    scan = ["load", "VERSION", "INSTREAM", "VERSION"]
+    assert events == ["update", *scan, *scan, "update", *scan]
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["You are on cool-down until after:", "You are still on cool-down until after:"],
+)
+def test_freshclam_cooldown_exit_zero_does_not_load_or_scan(line):
+    scanner = gateway.Scanner()
+    output = f"WARNING: {line} 2026-11-29 09:00:00\n".encode()
+    with (
+        patch.object(
+            gateway.subprocess, "run", return_value=subprocess.CompletedProcess("freshclam", 0, output)
+        ),
+        patch.object(scanner, "load") as load,
+        patch.object(gateway, "command") as command,
+    ):
+        with pytest.raises(RuntimeError, match="cooldown"):
+            scanner.scan(b"example")
+        load.assert_not_called()
+        command.assert_not_called()
 
 
 def test_failed_update_never_scans_and_releases_lock():
@@ -58,7 +81,7 @@ def test_failed_update_never_scans_and_releases_lock():
         with pytest.raises(subprocess.CalledProcessError):
             scanner.scan(b"example")
         command.assert_not_called()
-    assert scanner.updated_at == 0
+    assert scanner.updated_at is None
     assert scanner.lock.acquire(blocking=False)
     scanner.lock.release()
 
@@ -167,6 +190,17 @@ def test_real_http_scan_and_update_failure(http_gateway):
         urllib.request.urlopen(request, timeout=5)
     assert failure.value.code == 503
     assert b"private content" not in failure.value.read()
+
+
+def test_real_http_cooldown_has_fixed_error_code(http_gateway):
+    server, url = http_gateway
+    server.scanner.scan.side_effect = gateway.UpdateCooldown("not for clients")
+    request = urllib.request.Request(url + "/scan", data=b"document")
+    with pytest.raises(urllib.error.HTTPError) as failure:
+        urllib.request.urlopen(request, timeout=5)
+    with failure.value as response:
+        assert response.code == 503
+        assert json.load(response) == {"error": "signature_update_cooldown"}
 
 
 @pytest.mark.parametrize("reply", [b"stream: OK", b"stream: OK\\0extra\\0", b"\\xff\\0"])
