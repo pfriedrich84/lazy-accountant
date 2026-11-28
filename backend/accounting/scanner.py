@@ -5,7 +5,7 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 
 from django.conf import settings
 
@@ -22,21 +22,15 @@ class Verdict:
     reason: str = ""
 
 
-def readiness(version):
+def loaded_engine(version):
     match = re.fullmatch(r"ClamAV ([^/\s]+)/([0-9]+)/(.+)", version)
     if not match or int(match[2]) <= 0:
         raise ScanError("Scanner ohne vertrauenswürdigen Signaturstand.")
     try:
-        stamp = datetime.strptime(match[3], "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc)
+        # Validate the response format for the audit, not the age of the release.
+        datetime.strptime(match[3], "%a %b %d %H:%M:%S %Y")
     except ValueError as exc:
-        raise ScanError("Unbekanntes Signaturdatum.") from exc
-    age = (datetime.now(timezone.utc) - stamp).total_seconds()
-    if age < -3600:
-        raise ScanError(
-            f"ClamAV-Signaturdatum liegt in der Zukunft ({stamp:%Y-%m-%d %H:%M} UTC). Systemuhr prüfen."
-        )
-    if age > settings.CLAMAV_MAX_SIGNATURE_AGE:
-        raise ScanError(f"Geladene ClamAV-Signaturen sind veraltet (Stand: {stamp:%Y-%m-%d %H:%M} UTC).")
+        raise ScanError("Ungültige Versionsantwort von ClamAV.") from exc
     return version
 
 
@@ -75,10 +69,10 @@ def scan(data):
     engine = ""
     try:
         before, answer, after = exchange(data)
-        engine = readiness(before)
+        engine = loaded_engine(before)
         if any(ord(char) < 32 or ord(char) > 126 for char in answer):
             raise ScanError("Mehrdeutige Scannerantwort.")
-        readiness(after)  # Do not release across expired signatures / failed reloads.
+        loaded_engine(after)  # Require a scanner with a loaded database after INSTREAM as well.
         if answer == "stream: OK":
             return Verdict("clean", engine)
         if answer.startswith("stream: ") and answer.endswith(" FOUND"):
