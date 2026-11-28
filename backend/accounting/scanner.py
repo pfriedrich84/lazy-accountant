@@ -2,6 +2,7 @@
 
 import json
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,8 +31,12 @@ def readiness(version):
     except ValueError as exc:
         raise ScanError("Unbekanntes Signaturdatum.") from exc
     age = (datetime.now(timezone.utc) - stamp).total_seconds()
-    if age < -3600 or age > settings.CLAMAV_MAX_SIGNATURE_AGE:
-        raise ScanError("Scanner-Signaturen fehlen oder sind veraltet.")
+    if age < -3600:
+        raise ScanError(
+            f"ClamAV-Signaturdatum liegt in der Zukunft ({stamp:%Y-%m-%d %H:%M} UTC). Systemuhr prüfen."
+        )
+    if age > settings.CLAMAV_MAX_SIGNATURE_AGE:
+        raise ScanError(f"Geladene ClamAV-Signaturen sind veraltet (Stand: {stamp:%Y-%m-%d %H:%M} UTC).")
     return version
 
 
@@ -46,8 +51,19 @@ def exchange(data):
     )
     # Never send private document bytes through an environment-configured proxy.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=240) as response:
-        result = json.loads(response.read(16385))
+    try:
+        with opener.open(request, timeout=240) as response:
+            result = json.loads(response.read(16385))
+    except urllib.error.HTTPError as exc:
+        with exc:
+            if exc.code == 503:
+                try:
+                    error = json.loads(exc.read(1024))
+                except ValueError:
+                    error = None
+                if error == {"error": "signature_update_cooldown"}:
+                    raise ScanError("ClamAV-Signaturupdate durch CDN-Wartefrist blockiert.") from None
+        raise
     if not isinstance(result, dict) or any(
         not isinstance(result.get(key), str) for key in ("before", "answer", "after")
     ):
