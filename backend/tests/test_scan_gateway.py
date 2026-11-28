@@ -44,13 +44,19 @@ def test_cooldown_is_reported_without_releasing_bytes():
     assert "CDN-Wartefrist" in verdict.reason
 
 
-@pytest.mark.parametrize("delta, detail", [(timedelta(days=-3), "veraltet"), (timedelta(hours=2), "Zukunft")])
-def test_signature_date_errors_distinguish_stale_database_and_clock(settings, delta, detail):
-    settings.CLAMAV_MAX_SIGNATURE_AGE = 172800
-    stamp = datetime.now(timezone.utc) + delta
-    version = "ClamAV 1.5.5/123/" + stamp.strftime("%a %b %d %H:%M:%S %Y")
-    with patch.object(scanner, "exchange", return_value=(version, "stream: OK", version)):
+@pytest.mark.parametrize(
+    "answer, expected",
+    [
+        ("stream: OK", "clean"),
+        ("stream: Test-Signature FOUND", "infected"),
+        ("stream: timeout ERROR", "error"),
+    ],
+)
+def test_successful_update_check_with_older_signatures_uses_actual_scan_verdict(answer, expected):
+    stamp = datetime.now(timezone.utc) - timedelta(days=4)
+    version = "ClamAV 1.5.5/28194/" + stamp.strftime("%a %b %d %H:%M:%S %Y")
+    response = io.BytesIO(json.dumps({"before": version, "after": version, "answer": answer}).encode())
+    with patch("urllib.request.OpenerDirector.open", return_value=response):
         verdict = scanner.scan(b"example")
-    assert verdict.result == "error"
-    assert detail in verdict.reason
-    assert f"{stamp:%Y-%m-%d %H:%M} UTC" in verdict.reason
+    assert verdict.result == expected
+    assert verdict.engine == version

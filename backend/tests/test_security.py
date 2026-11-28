@@ -176,12 +176,13 @@ def test_strict_scanner_responses(answer, expected):
     [
         "ClamAV 1.5.5",
         "ClamAV 1.5.5/0/Fri Nov 20 01:00:00 2026",
-        "ClamAV 1.5.5/123/Fri Nov 20 01:00:00 2020",
+        "ClamAV 1.5.5/123/not-a-date",
     ],
 )
-def test_missing_and_stale_signatures(version):
-    with patch.object(scanner, "exchange", return_value=(version, "stream: OK", version)):
-        assert scanner.scan(EICAR).result == "error"
+def test_missing_database_or_malformed_clamd_version_is_blocked(version):
+    for before, after in [(version, ENGINE), (ENGINE, version)]:
+        with patch.object(scanner, "exchange", return_value=(before, "stream: OK", after)):
+            assert scanner.scan(EICAR).result == "error"
 
 
 @pytest.mark.parametrize("failure", [ConnectionRefusedError(), TimeoutError()])

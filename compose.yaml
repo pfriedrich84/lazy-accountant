@@ -27,7 +27,6 @@ x-app: &app
     CLAMAV_HOST: clamav
     CLAMAV_GATEWAY_PORT: "3311"
     CLAMAV_TIMEOUT: "${CLAMAV_TIMEOUT:-60}"
-    CLAMAV_MAX_SIGNATURE_AGE: "${CLAMAV_MAX_SIGNATURE_AGE:-172800}"
   volumes:
     - documents:/data
   restart: unless-stopped
